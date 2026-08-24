@@ -363,6 +363,55 @@ def test_malformed_rule_rows_fail_closed_at_construction() -> None:
         JurisdictionRule(**{**base, "calendar": "not a calendar"})  # type: ignore[arg-type]
 
 
+def test_case_input_rejects_serialized_and_malformed_fields() -> None:
+    # Raw serialized values must never bypass the method-specific safeguards:
+    # a string "tack_and_mail" is not TACK_AND_MAIL and would compute a
+    # clean-looking deadline with zero flags (round-4 finding).
+    with pytest.raises(TypeError, match="service_method"):
+        CaseInput(
+            case_id="X",
+            jurisdiction_id="GA-FULTON",
+            service_date=date(2026, 8, 10),
+            service_method="tack_and_mail",  # type: ignore[arg-type]
+        )
+    with pytest.raises(TypeError, match="service_method"):
+        CaseInput(
+            case_id="X",
+            jurisdiction_id="GA-FULTON",
+            service_date=date(2026, 8, 10),
+            service_method=None,  # type: ignore[arg-type]
+        )
+    with pytest.raises(TypeError, match="service_date"):
+        CaseInput(
+            case_id="X",
+            jurisdiction_id="GA-FULTON",
+            service_date=datetime(2026, 8, 10, 9, 0),
+            service_method=ServiceMethod.PERSONAL,
+        )
+    with pytest.raises(TypeError, match="summons_stated_deadline"):
+        CaseInput(
+            case_id="X",
+            jurisdiction_id="GA-FULTON",
+            service_date=date(2026, 8, 10),
+            service_method=ServiceMethod.PERSONAL,
+            summons_stated_deadline="2026-08-17",  # type: ignore[arg-type]
+        )
+
+
+def test_summons_stating_a_closed_clerk_day_raises_the_closure_flag() -> None:
+    # Service Wed Dec 23: computed day 7 is Wed Dec 30 (open). The summons
+    # says Dec 31, the closed-but-not-a-holiday day. The closure hazard must
+    # fire on the EFFECTIVE date, not hide behind the generic conflict flag
+    # (round-4 finding).
+    result = compute(make_case(date(2026, 12, 23), summons_stated_deadline=date(2026, 12, 31)))
+    assert result.computed_deadline == date(2026, 12, 30)
+    assert result.effective_deadline == date(2026, 12, 31)
+    assert result.deadline_basis is DeadlineBasis.SUMMONS_CONTROLS
+    assert FlagCode.SUMMONS_DATE_CONFLICT in flag_codes(result)
+    assert FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY in flag_codes(result)
+    assert result.court_reopens_on is None  # 2027 closure data ends at Jan 1
+
+
 def test_summons_controls_timestamp_comes_from_summons_date() -> None:
     # Computed Aug 17, summons says Aug 18: summons controls, and the precise
     # timestamp follows the controlling date (verified computation exists).
@@ -383,7 +432,9 @@ def test_next_court_open_day_inspects_the_coverage_boundary_itself() -> None:
         legal_holidays=frozenset(),
         court_closures=frozenset({date(2026, 6, 1), date(2026, 6, 2)}),
         holiday_coverage_start=date(2026, 1, 1),
-        holiday_coverage_end=date(2026, 12, 31),
+        # Holiday coverage may not outrun closure coverage (round-4 rule), so
+        # both end on the boundary date under test.
+        holiday_coverage_end=date(2026, 6, 3),
         closure_coverage_end=date(2026, 6, 3),  # Wed, open weekday, the boundary
     )
     rule = JurisdictionRule(

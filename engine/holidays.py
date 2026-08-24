@@ -119,8 +119,15 @@ class HolidayCalendar:
                 raise TypeError(f"{name} must be a datetime.date, got {d!r}")
         if self.holiday_coverage_start > self.holiday_coverage_end:
             raise ValueError("holiday coverage bounds are inverted")
-        if self.closure_coverage_end < self.holiday_coverage_start:
-            raise ValueError("closure_coverage_end precedes holiday_coverage_start")
+        if self.closure_coverage_end < self.holiday_coverage_end:
+            # Closure knowledge must extend at least as far as holiday
+            # knowledge: otherwise a date inside holiday coverage but past
+            # closure coverage would read "absent from closures" as "open",
+            # and an unknown closure would be reported as an open courthouse.
+            raise ValueError(
+                "closure_coverage_end must be on or after holiday_coverage_end; "
+                "unknown closure dates must never be treated as open days"
+            )
         for d in self.legal_holidays:
             if not (self.holiday_coverage_start <= d <= self.holiday_coverage_end):
                 raise ValueError(f"legal holiday {d.isoformat()} lies outside holiday coverage")

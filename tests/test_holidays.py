@@ -94,3 +94,13 @@ def test_calendar_construction_rejects_inverted_or_inconsistent_bounds() -> None
             holiday_coverage_end=date(2026, 12, 31),
             closure_coverage_end=date(2027, 1, 1),
         )
+    # Closure coverage ending before holiday coverage would make unknown
+    # closure dates read as open courthouses (round-4 finding).
+    with pytest.raises(ValueError, match="closure_coverage_end"):
+        HolidayCalendar(
+            legal_holidays=frozenset({date(2026, 8, 17)}),
+            court_closures=frozenset(),
+            holiday_coverage_start=date(2026, 1, 1),
+            holiday_coverage_end=date(2026, 12, 31),
+            closure_coverage_end=date(2026, 6, 3),
+        )

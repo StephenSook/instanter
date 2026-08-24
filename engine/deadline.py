@@ -81,6 +81,25 @@ class CaseInput:
     summons_stated_deadline: date | None = None
     amended_affidavit: bool = False
 
+    def __post_init__(self) -> None:
+        # Intake rows arrive from serialization; a raw string like
+        # "tack_and_mail" would otherwise fall through every method-specific
+        # safeguard and compute a clean-looking deadline with no flags.
+        if not isinstance(self.service_method, ServiceMethod):
+            raise TypeError(f"service_method must be a ServiceMethod, got {self.service_method!r}")
+        for name, value in (
+            ("service_date", self.service_date),
+            ("posting_date", self.posting_date),
+            ("mailing_date", self.mailing_date),
+            ("summons_stated_deadline", self.summons_stated_deadline),
+        ):
+            # Exact date type: a datetime subclasses date but compares unequal,
+            # which would silently defeat calendar membership checks.
+            if value is not None and type(value) is not date:
+                raise TypeError(f"{name} must be a datetime.date or None, got {value!r}")
+        if type(self.amended_affidavit) is not bool:
+            raise TypeError(f"amended_affidavit must be a bool, got {self.amended_affidavit!r}")
+
 
 @dataclass(frozen=True)
 class DeadlineResult:
@@ -283,28 +302,8 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
             "refusing to compute a deadline under an unvalidated rule"
         )
 
-    court_reopens: date | None = None
     if computed is not None:
         trace.append(TraceStep(computed, "last day to answer (statutory computation)"))
-        if rule.calendar.is_court_closure(computed) and not rule.calendar.is_legal_holiday(
-            computed
-        ):
-            court_reopens = _next_court_open_day(rule, computed)
-            reopen_text = (
-                f" The clerk's office next opens {court_reopens.isoformat()}."
-                if court_reopens
-                else ""
-            )
-            flags.append(
-                Flag(
-                    FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY,
-                    f"Computed last day {computed.isoformat()} is a courthouse "
-                    "closure that is NOT a Georgia legal holiday, so the "
-                    "statute does not roll it forward, and absent a judicial "
-                    "emergency order there is no automatic extension. An "
-                    f"attorney must resolve this date.{reopen_text}",
-                )
-            )
 
     # Summons-stated date controls for the tenant when present. When the
     # computation was refused (coverage gap), the summons date is preserved
@@ -329,6 +328,34 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
                     "(O.C.G.A. 44-7-51(b)); the discrepancy needs attorney review.",
                 )
             )
+
+    # Closed-clerk anomaly check runs on the EFFECTIVE deadline, after
+    # summons resolution: a summons stating December 31 must raise the
+    # closed-courthouse hazard even when the computed date was fine, or the
+    # specific danger hides behind a generic conflict warning. Only checkable
+    # when the holiday calendar covers the date (closure coverage is
+    # guaranteed at least as long by construction).
+    court_reopens: date | None = None
+    if (
+        effective is not None
+        and rule.calendar.holiday_knowledge_covers(effective)
+        and rule.calendar.is_court_closure(effective)
+        and not rule.calendar.is_legal_holiday(effective)
+    ):
+        court_reopens = _next_court_open_day(rule, effective)
+        reopen_text = (
+            f" The clerk's office next opens {court_reopens.isoformat()}." if court_reopens else ""
+        )
+        flags.append(
+            Flag(
+                FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY,
+                f"Last day to answer {effective.isoformat()} is a courthouse "
+                "closure that is NOT a Georgia legal holiday, so the "
+                "statute does not roll it forward, and absent a judicial "
+                "emergency order there is no automatic extension. An "
+                f"attorney must resolve this date.{reopen_text}",
+            )
+        )
 
     # Invariant: a precise timestamp exists ONLY when the statutory
     # computation completed. An unverified summons-only date keeps its
