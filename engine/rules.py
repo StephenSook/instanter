@@ -40,12 +40,27 @@ class JurisdictionRule:
     intermediate_days_counted: bool  # calendar days count in the window
     terminal_roll: TerminalRoll
     calendar: HolidayCalendar
+
     # Service-method notes that must surface with a computed deadline.
     tack_and_mail_money_judgment_note: str
     tender_window_days: int | None  # O.C.G.A. 44-7-52 parallel advisory window
     deadline_time_of_day: str  # local clerk close, display-level
     deadline_timezone: str
     notes: str
+
+    def __post_init__(self) -> None:
+        # A rule row is legal configuration; a malformed row must fail closed
+        # at construction, never fall open into a wrong deadline downstream
+        # (a serialized string in an enum field would otherwise skip the
+        # terminal roll and yield a weekend deadline with no flag).
+        if not isinstance(self.counting_basis, CountingBasis):
+            raise TypeError(f"counting_basis must be a CountingBasis, got {self.counting_basis!r}")
+        if not isinstance(self.terminal_roll, TerminalRoll):
+            raise TypeError(f"terminal_roll must be a TerminalRoll, got {self.terminal_roll!r}")
+        if not isinstance(self.window_length_days, int) or self.window_length_days < 1:
+            raise ValueError(
+                f"window_length_days must be a positive int, got {self.window_length_days!r}"
+            )
 
 
 GEORGIA_RULE = JurisdictionRule(

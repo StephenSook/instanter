@@ -40,6 +40,17 @@ class FlagCode(Enum):
     JURISDICTION_UNSUPPORTED = "jurisdiction_unsupported"
 
 
+class DeadlineBasis(Enum):
+    """What the effective deadline rests on. Callers must never treat a
+    SUMMONS_ONLY_UNVERIFIED date as a finalized statutory computation."""
+
+    COMPUTED = "computed"  # statutory computation only; no summons date supplied
+    SUMMONS_CONFIRMS = "summons_confirms"  # computation and summons agree
+    SUMMONS_CONTROLS = "summons_controls"  # they conflict; summons controls for the tenant
+    SUMMONS_ONLY_UNVERIFIED = "summons_only_unverified"  # computation refused; summons unverified
+    NONE = "none"  # no deadline could be established at all
+
+
 @dataclass(frozen=True)
 class Flag:
     code: FlagCode
@@ -80,12 +91,18 @@ class DeadlineResult:
     tender_deadline: date | None
     court_reopens_on: date | None
     flags: tuple[Flag, ...]
+    deadline_basis: DeadlineBasis = DeadlineBasis.NONE
     trace: tuple[TraceStep, ...] = field(default=())
     citation: str = ""
 
     @property
     def needs_human_review(self) -> bool:
         return len(self.flags) > 0
+
+    @property
+    def computation_refused(self) -> bool:
+        """True when the statutory computation could not be completed."""
+        return self.computed_deadline is None
 
     @property
     def refused(self) -> bool:
@@ -100,12 +117,13 @@ def _next_court_open_day(rule: JurisdictionRule, start: date) -> date | None:
     """First day after ``start`` that is a weekday and not a courthouse closure.
 
     Advisory only; used to tell the attorney when the clerk's office reopens.
-    Returns None if the closure table's coverage runs out first.
+    Returns None as soon as the closure table's coverage runs out: a date we
+    have no closure data for must never be reported as an open day.
     """
     day = start
     for _ in range(30):
         day = day + timedelta(days=1)
-        if day > rule.calendar.closure_coverage_end and rule.calendar.is_court_closure(day):
+        if day > rule.calendar.closure_coverage_end:
             return None
         if not _is_weekend(day) and not rule.calendar.is_court_closure(day):
             return day
@@ -199,6 +217,11 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
                     "answer, that date controls for the tenant.",
                 ),
             ),
+            deadline_basis=(
+                DeadlineBasis.SUMMONS_ONLY_UNVERIFIED
+                if case.summons_stated_deadline is not None
+                else DeadlineBasis.NONE
+            ),
             citation=rule.citation_string,
         )
 
@@ -247,11 +270,18 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
         TraceStep(candidate, f"day {rule.window_length_days} (calendar days; intermediates count)")
     )
 
+    # Exhaustive dispatch: an unknown terminal-roll value must never fall
+    # open into "no roll", which would silently produce a weekend deadline.
     computed: date | None
     if rule.terminal_roll is TerminalRoll.NEXT_NON_WEEKEND_NON_HOLIDAY:
         computed = _roll_terminal_day(rule, candidate, trace, flags)
-    else:
+    elif rule.terminal_roll is TerminalRoll.NONE:
         computed = candidate
+    else:
+        raise TypeError(
+            f"unsupported terminal_roll value {rule.terminal_roll!r}; "
+            "refusing to compute a deadline under an unvalidated rule"
+        )
 
     court_reopens: date | None = None
     if computed is not None:
@@ -276,11 +306,20 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
                 )
             )
 
-    # Summons-stated date controls for the tenant when present.
+    # Summons-stated date controls for the tenant when present. When the
+    # computation was refused (coverage gap), the summons date is preserved
+    # but explicitly labeled UNVERIFIED: it never launders a refusal into a
+    # finalized-looking deadline.
     effective = computed
+    basis = DeadlineBasis.COMPUTED if computed is not None else DeadlineBasis.NONE
     if case.summons_stated_deadline is not None:
         effective = case.summons_stated_deadline
-        if computed is not None and case.summons_stated_deadline != computed:
+        if computed is None:
+            basis = DeadlineBasis.SUMMONS_ONLY_UNVERIFIED
+        elif case.summons_stated_deadline == computed:
+            basis = DeadlineBasis.SUMMONS_CONFIRMS
+        else:
+            basis = DeadlineBasis.SUMMONS_CONTROLS
             flags.append(
                 Flag(
                     FlagCode.SUMMONS_DATE_CONFLICT,
@@ -317,6 +356,7 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
         tender_deadline=tender,
         court_reopens_on=court_reopens,
         flags=tuple(flags),
+        deadline_basis=basis,
         trace=tuple(trace),
         citation=rule.citation_string,
     )
