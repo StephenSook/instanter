@@ -91,14 +91,25 @@ class AuditToolHook(HookProvider):
     def _record(self, event: AfterToolCallEvent) -> None:
         result = event.result
         status = result.get("status") if isinstance(result, dict) else None
+        payload: dict[str, Any] = {
+            "tool": event.tool_use["name"],
+            "status": str(status),
+        }
+        if status == "error" and isinstance(result, dict):
+            # Framework-level rejections (e.g. schema validation before the
+            # tool body runs) only surface here; keep a bounded excerpt so
+            # the audit says WHY, not just that an error happened.
+            texts = [
+                str(block.get("text", ""))[:300]
+                for block in result.get("content", [])
+                if isinstance(block, dict) and "text" in block
+            ]
+            payload["error"] = " | ".join(texts)[:600]
         self._ctx.audit.append(
             AuditEvent(
                 kind="tool_call",
                 case_id=None,
-                payload={
-                    "tool": event.tool_use["name"],
-                    "status": str(status),
-                },
+                payload=payload,
                 run_id=self._ctx.run_id,
             )
         )

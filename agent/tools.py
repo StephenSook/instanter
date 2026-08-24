@@ -29,6 +29,14 @@ def _dump_validation_error(exc: ValidationError) -> str:
     return f"VALIDATION FAILED: {issues}. Correct the output and resubmit."
 
 
+def _rejection_payload(exc: ValidationError) -> dict[str, Any]:
+    """Bounded error detail for the audit trail: WHY a submission was
+    rejected, not just that one was (diagnosing live-model behavior
+    depends on this)."""
+    details = [f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}"[:200] for e in exc.errors()[:5]]
+    return {"errors": exc.error_count(), "details": details}
+
+
 def build_tools(ctx: RunContext) -> dict[str, Any]:
     """Build the tool set closed over one run's context."""
 
@@ -47,26 +55,45 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         return json.dumps(rows)
 
     @tool
-    def submit_case_observations(case_id: str, observations: dict[str, Any]) -> str:
+    def submit_case_observations(
+        case_id: str,
+        summary: str,
+        needs_human_confirmation: bool,
+        confidence: float,
+        mentions_service_by_posting: bool | None = None,
+        mentions_answer_already_filed: bool | None = None,
+        mentions_hearing_or_deadline_change: bool | None = None,
+        mentions_possible_defective_service: bool | None = None,
+        ambiguities: list[str] | None = None,
+    ) -> str:
         """Submit typed observations extracted from one case's notes.
 
-        The observations object must match the ExtractedObservations schema:
-        summary, mentions_* booleans (or null when not mentioned),
-        ambiguities (open questions for staff), needs_human_confirmation,
-        and confidence between 0 and 1. State only what the notes say;
-        anything uncertain belongs in ambiguities with
-        needs_human_confirmation=true. Never include advice.
+        summary states only what the notes say (never advice). Each
+        mentions_* boolean is true/false when the notes address it, omitted
+        when not mentioned. ambiguities is a list of plain-string open
+        questions a staff member must confirm; set
+        needs_human_confirmation=true whenever any signal is uncertain or
+        conflicting. confidence is between 0 and 1.
         """
         if case_id not in ctx.records:
             return f"UNKNOWN CASE: {case_id!r} is not in this run's intake."
         try:
-            parsed = ExtractedObservations(**observations)
+            parsed = ExtractedObservations(
+                summary=summary,
+                needs_human_confirmation=needs_human_confirmation,
+                confidence=confidence,
+                mentions_service_by_posting=mentions_service_by_posting,
+                mentions_answer_already_filed=mentions_answer_already_filed,
+                mentions_hearing_or_deadline_change=mentions_hearing_or_deadline_change,
+                mentions_possible_defective_service=mentions_possible_defective_service,
+                ambiguities=ambiguities or [],
+            )
         except ValidationError as exc:
             ctx.audit.append(
                 AuditEvent(
                     kind="observation_rejected",
                     case_id=case_id,
-                    payload={"errors": exc.error_count()},
+                    payload=_rejection_payload(exc),
                     run_id=ctx.run_id,
                 )
             )
@@ -167,13 +194,21 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         )
 
     @tool
-    def submit_escalation_rationale(case_id: str, rationale: dict[str, Any]) -> str:
+    def submit_escalation_rationale(
+        case_id: str,
+        disposition: str,
+        contributing_factors: list[str],
+        rationale: str,
+        confidence: float,
+    ) -> str:
         """Submit the escalation rationale for ONE interrupt-now case.
 
-        The rationale object must match the EscalationRationale schema, its
-        disposition must echo the ladder's level for this case exactly, and
-        its contributing_factors must restate the ladder's deterministic
-        factors. Facts only; the ladder decided, you explain.
+        disposition must echo the ladder's level for this case exactly
+        (e.g. 'interrupt'); contributing_factors restates the ladder's
+        deterministic factors as plain strings; rationale is a short
+        factual explanation (deadline date, days remaining, flags, queue
+        position) with no advice; confidence is between 0 and 1. Facts
+        only; the ladder decided, you explain.
         """
         decision = ctx.decision_for(case_id)
         if decision is None:
@@ -184,13 +219,19 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 "this run; rationales are only written for interrupt-now cases."
             )
         try:
-            parsed = EscalationRationale(**{**rationale, "case_id": case_id})
+            parsed = EscalationRationale(
+                case_id=case_id,
+                disposition=disposition,
+                contributing_factors=contributing_factors,
+                rationale=rationale,
+                confidence=confidence,
+            )
         except ValidationError as exc:
             ctx.audit.append(
                 AuditEvent(
                     kind="rationale_rejected",
                     case_id=case_id,
-                    payload={"errors": exc.error_count()},
+                    payload=_rejection_payload(exc),
                     run_id=ctx.run_id,
                 )
             )
@@ -264,6 +305,8 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         """
         if case_id not in ctx.committed_case_ids:
             return f"NOT COMMITTED: {case_id!r} has no committed escalation this run."
+        if case_id in ctx.packet_memos:
+            return f"ALREADY RECORDED: {case_id} has a packet memo this run; do not submit another."
         from agent.models import _reject_advice_language  # runtime boundary, same floor
 
         try:
