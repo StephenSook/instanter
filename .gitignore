@@ -1,0 +1,52 @@
+# Private research material never reaches GitHub (standing ~/dev convention).
+# The repo (when one exists) tracks code only. Stage named paths, never git add -A.
+*.pdf
+
+# Env + secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Deps + build
+node_modules/
+.next/
+dist/
+build/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS/IDE
+.DS_Store
+.vscode/
+.idea/
+*.log
+
+# Private working files (strategy + agent instructions stay local; never published)
+/CLAUDE.md
+/AGENTS.md
+/.claude/
+/docs/private/
+
+# Apple push credentials (Live Activity / APNs signing keys)
+*.p8
+*.mobileprovision
+*.cer
+*.p12
+
+# Build systems added for this project
+cdk.out/
+.expo/
+.eas/
+coverage/
+htmlcov/
+playwright-report/
+test-results/
+.coverage
+.uv-cache/
