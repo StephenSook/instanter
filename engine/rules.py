@@ -52,6 +52,15 @@ class JurisdictionRule:
     # row never emits Georgia- or Fulton-specific legal claims.
     jurisdiction_label: str = "this jurisdiction"
     court_label: str = "the courthouse"
+    # Legal authority for "the summons-stated date controls for the tenant".
+    # Empty means no configured authority: the warning then states the rule
+    # without citing a statute, so a generic row never cites another
+    # jurisdiction's law.
+    summons_authority: str = ""
+    # Jurisdiction-specific fact about what calendar the summons keys its
+    # roll to. Empty means unconfigured: the divergence warning omits any
+    # claim about the summons's roll basis.
+    summons_roll_note: str = ""
 
     def __post_init__(self) -> None:
         # A rule row is legal configuration; a malformed row must fail closed
@@ -115,6 +124,12 @@ class JurisdictionRule:
         ):
             if type(label) is not str or not label.strip():
                 raise ValueError(f"{label_name} must be a non-empty string, got {label!r}")
+        for field_name, value in (
+            ("summons_authority", self.summons_authority),
+            ("summons_roll_note", self.summons_roll_note),
+        ):
+            if type(value) is not str:
+                raise TypeError(f"{field_name} must be a string, got {value!r}")
 
 
 GEORGIA_RULE = JurisdictionRule(
@@ -141,6 +156,8 @@ GEORGIA_RULE = JurisdictionRule(
     ),
     jurisdiction_label="Georgia",
     court_label="the Fulton courthouse",
+    summons_authority="O.C.G.A. 44-7-51(b)",
+    summons_roll_note="the summons keys its roll to a court-holiday calendar",
 )
 
 RULES: dict[str, JurisdictionRule] = {GEORGIA_RULE.jurisdiction_id: GEORGIA_RULE}

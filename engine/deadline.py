@@ -247,10 +247,13 @@ def _roll_terminal_day(
                         FlagCode.STATE_HOLIDAY_COURT_OPEN,
                         f"{day.isoformat()} is a {rule.jurisdiction_label} legal "
                         f"holiday, but {rule.court_label} is open that day. The "
-                        "statute rolls the deadline past it, while the summons "
-                        "keys its roll to a court-holiday calendar; the "
-                        "calendars diverge here and an attorney must confirm "
-                        "the operative date.",
+                        "statute rolls the deadline past it"
+                        # A claim about the summons's roll basis is a
+                        # jurisdiction-specific fact; state it only when the
+                        # rule row configures it.
+                        + (f", while {rule.summons_roll_note}" if rule.summons_roll_note else "")
+                        + "; the calendars diverge here and an attorney must "
+                        "confirm the operative date.",
                         day=day,
                     )
                 )
@@ -381,7 +384,10 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
                     "dispatcher, not here.",
                 ),
             ),
-            citation=rule.citation_string,
+            # No legal citation on a rule mismatch: the supplied rule's
+            # statutes are the wrong jurisdiction's authority and must not
+            # contaminate an audit record or a generic result renderer.
+            citation="",
         )
 
     if case.service_date is None:
@@ -499,13 +505,16 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
             basis = DeadlineBasis.SUMMONS_CONFIRMS
         else:
             basis = DeadlineBasis.SUMMONS_CONTROLS
+            # Cite only the rule's own configured authority; a generic row
+            # must never emit another jurisdiction's statute.
+            authority = f" ({rule.summons_authority})" if rule.summons_authority else ""
             flags.append(
                 Flag(
                     FlagCode.SUMMONS_DATE_CONFLICT,
                     f"Summons states {case.summons_stated_deadline.isoformat()} "
                     f"but the statutory computation gives {computed.isoformat()}. "
-                    "The summons-stated date controls for the tenant "
-                    "(O.C.G.A. 44-7-51(b)); the discrepancy needs attorney review.",
+                    "The summons-stated date controls for the tenant"
+                    f"{authority}; the discrepancy needs attorney review.",
                 )
             )
 
