@@ -466,6 +466,25 @@ def test_missing_service_still_carries_method_and_affidavit_risks() -> None:
     assert FlagCode.TACK_AND_MAIL_DATE_SPLIT in flag_codes(tack)
     # Mismatch check needs a service date, so it must NOT fire here.
     assert FlagCode.TACK_AND_MAIL_SERVICE_MISMATCH not in flag_codes(tack)
+    # Round-8 finding: the split warning must not claim a service date was
+    # used for computation when the computation was refused.
+    split_reason = next(f.reason for f in tack.flags if f.code is FlagCode.TACK_AND_MAIL_DATE_SPLIT)
+    assert "no deadline was computed" in split_reason
+    assert "is used for computation" not in split_reason
+
+    # And on the computed path the original wording stands.
+    computed_split = compute(
+        make_case(
+            date(2026, 8, 12),
+            ServiceMethod.TACK_AND_MAIL,
+            posting_date=date(2026, 8, 10),
+            mailing_date=date(2026, 8, 11),
+        )
+    )
+    computed_reason = next(
+        f.reason for f in computed_split.flags if f.code is FlagCode.TACK_AND_MAIL_DATE_SPLIT
+    )
+    assert "is used for computation" in computed_reason
 
     unknown = compute(make_case(None, ServiceMethod.UNKNOWN))
     assert FlagCode.UNKNOWN_SERVICE_METHOD in flag_codes(unknown)

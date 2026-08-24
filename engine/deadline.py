@@ -265,12 +265,20 @@ def _flag_intake_risks(case: CaseInput, rule: JurisdictionRule, flags: list[Flag
             and case.mailing_date is not None
             and case.posting_date != case.mailing_date
         ):
+            # Refusal-aware wording: on the missing-service path no date was
+            # used for anything, and saying otherwise would mislead the
+            # reviewing attorney about whether a deadline was calculated.
+            consequence = (
+                "the entered service date is used for computation"
+                if case.service_date is not None
+                else "no deadline was computed because the service date is unconfirmed"
+            )
             flags.append(
                 Flag(
                     FlagCode.TACK_AND_MAIL_DATE_SPLIT,
                     f"Posting date {case.posting_date.isoformat()} and mailing "
-                    f"date {case.mailing_date.isoformat()} differ; the entered "
-                    "service date is used for computation, and an attorney "
+                    f"date {case.mailing_date.isoformat()} differ; "
+                    f"{consequence}, and an attorney "
                     "must confirm which date starts the clock.",
                 )
             )
