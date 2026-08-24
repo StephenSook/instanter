@@ -7,12 +7,13 @@ December 24 appear on BOTH calendars and are deliberately asserted as
 non-divergent, because an earlier research pass wrongly counted them.
 """
 
-from datetime import date
+from datetime import date, datetime
 
 from engine.holidays import (
     FULTON_COURT_CLOSURES_2026,
     GEORGIA_2026_CALENDAR,
     GEORGIA_LEGAL_HOLIDAYS_2026,
+    HolidayCalendar,
 )
 
 
@@ -55,3 +56,41 @@ def test_july_observance_is_friday_july_3() -> None:
 def test_coverage_guard_rejects_2027() -> None:
     assert GEORGIA_2026_CALENDAR.holiday_knowledge_covers(date(2026, 12, 31))
     assert not GEORGIA_2026_CALENDAR.holiday_knowledge_covers(date(2027, 1, 4))
+
+
+def test_calendar_construction_rejects_datetime_elements() -> None:
+    # datetime subclasses date but never equals one: a datetime in the set
+    # would silently erase the holiday and ship a wrong deadline as verified.
+    import pytest
+
+    with pytest.raises(TypeError, match="legal_holidays"):
+        HolidayCalendar(
+            # No type: ignore needed: datetime IS a date to the type system,
+            # which is exactly why the runtime check must exist.
+            legal_holidays=frozenset({datetime(2026, 1, 19, 12)}),
+            court_closures=frozenset(),
+            holiday_coverage_start=date(2026, 1, 1),
+            holiday_coverage_end=date(2026, 12, 31),
+            closure_coverage_end=date(2026, 12, 31),
+        )
+
+
+def test_calendar_construction_rejects_inverted_or_inconsistent_bounds() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="inverted"):
+        HolidayCalendar(
+            legal_holidays=frozenset(),
+            court_closures=frozenset(),
+            holiday_coverage_start=date(2026, 12, 31),
+            holiday_coverage_end=date(2026, 1, 1),
+            closure_coverage_end=date(2026, 12, 31),
+        )
+    with pytest.raises(ValueError, match="outside holiday coverage"):
+        HolidayCalendar(
+            legal_holidays=frozenset({date(2027, 6, 1)}),
+            court_closures=frozenset(),
+            holiday_coverage_start=date(2026, 1, 1),
+            holiday_coverage_end=date(2026, 12, 31),
+            closure_coverage_end=date(2027, 1, 1),
+        )

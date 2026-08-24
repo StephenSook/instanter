@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from zoneinfo import ZoneInfo
 
 from engine.holidays import GEORGIA_2026_CALENDAR, HolidayCalendar
 
@@ -79,6 +80,31 @@ class JurisdictionRule:
                 f"tender_window_days must be None or a positive int, "
                 f"got {self.tender_window_days!r}"
             )
+        if self.counting_basis is not CountingBasis.DAY_OF_SERVICE_EXCLUDED:
+            # Only day-of-service-excluded counting is implemented; a row
+            # claiming otherwise would be miscomputed, so it must refuse here,
+            # not crash mid-computation.
+            raise NotImplementedError(
+                f"counting basis {self.counting_basis.value!r} is not implemented"
+            )
+        if not isinstance(self.calendar, HolidayCalendar):
+            raise TypeError(f"calendar must be a HolidayCalendar, got {type(self.calendar)!r}")
+        # deadline_time_of_day must be exactly HH:MM; a seconds-bearing value
+        # would crash deep inside computation instead of failing here.
+        parts = self.deadline_time_of_day.split(":")
+        if len(parts) != 2 or not all(p.isdigit() for p in parts):
+            raise ValueError(
+                f"deadline_time_of_day must be 'HH:MM', got {self.deadline_time_of_day!r}"
+            )
+        hour, minute = int(parts[0]), int(parts[1])
+        if hour > 23 or minute > 59:
+            raise ValueError(
+                f"deadline_time_of_day must be a valid clock time, "
+                f"got {self.deadline_time_of_day!r}"
+            )
+        # Instantiating the zone at construction surfaces an unknown timezone
+        # immediately rather than at the first computed deadline.
+        ZoneInfo(self.deadline_timezone)
 
 
 GEORGIA_RULE = JurisdictionRule(

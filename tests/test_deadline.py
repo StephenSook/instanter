@@ -9,7 +9,7 @@ calendar coverage guard, and jurisdiction-table extensibility.
 """
 
 from datetime import date, datetime
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
 from hypothesis import given
@@ -347,6 +347,28 @@ def test_malformed_rule_rows_fail_closed_at_construction() -> None:
         JurisdictionRule(**{**base, "tender_window_days": 0})  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="tender_window_days"):
         JurisdictionRule(**{**base, "tender_window_days": True})  # type: ignore[arg-type]
+    # Deadline-driving config crashes must happen at construction, not at the
+    # first computed deadline (round-3 adversarial findings).
+    with pytest.raises(ValueError, match="deadline_time_of_day"):
+        JurisdictionRule(**{**base, "deadline_time_of_day": "17:00:00"})  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="deadline_time_of_day"):
+        JurisdictionRule(**{**base, "deadline_time_of_day": "25:00"})  # type: ignore[arg-type]
+    with pytest.raises(ZoneInfoNotFoundError):
+        JurisdictionRule(**{**base, "deadline_timezone": "Not/AZone"})  # type: ignore[arg-type]
+    with pytest.raises(NotImplementedError):
+        JurisdictionRule(
+            **{**base, "counting_basis": CountingBasis.DAY_OF_SERVICE_INCLUDED}  # type: ignore[arg-type]
+        )
+    with pytest.raises(TypeError):
+        JurisdictionRule(**{**base, "calendar": "not a calendar"})  # type: ignore[arg-type]
+
+
+def test_summons_controls_timestamp_comes_from_summons_date() -> None:
+    # Computed Aug 17, summons says Aug 18: summons controls, and the precise
+    # timestamp follows the controlling date (verified computation exists).
+    result = compute(make_case(date(2026, 8, 10), summons_stated_deadline=date(2026, 8, 18)))
+    assert result.deadline_basis is DeadlineBasis.SUMMONS_CONTROLS
+    assert result.deadline_at == datetime(2026, 8, 18, 17, 0, tzinfo=ZoneInfo("America/New_York"))
 
 
 def test_next_court_open_day_inspects_the_coverage_boundary_itself() -> None:
