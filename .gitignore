@@ -1,6 +1,7 @@
 # Private research material never reaches GitHub (standing ~/dev convention).
-# The repo (when one exists) tracks code only. Stage named paths, never git add -A.
+# The repo tracks code only. Stage named paths, never git add -A.
 *.pdf
+/research/
 
 # Env + secrets
 .env
