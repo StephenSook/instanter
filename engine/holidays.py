@@ -54,6 +54,14 @@ GEORGIA_LEGAL_HOLIDAYS_2026: frozenset[date] = frozenset(
 # Fulton County courthouse closures, 2026 window
 # (fultonsuperiorcourtga.gov/court-holidays; includes the New Year closure
 # that opens the 2027 window).
+#
+# KNOWN LIMITATION (documented, not silent): dispossessory answers are filed
+# in MAGISTRATE court, and this table is sourced from the Superior Court
+# courthouse schedule; the Magistrate court publishes no machine-readable
+# closure list, and its independent alignment with these 14 dates is
+# unverified. The engine's design tolerates this: any terminal day that is a
+# closure but not a legal holiday is flagged for attorney review rather than
+# resolved, and the summons-stated date controls for the tenant regardless.
 FULTON_COURT_CLOSURES_2026: frozenset[date] = frozenset(
     {
         date(2026, 1, 1),
