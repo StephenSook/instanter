@@ -484,7 +484,37 @@ def test_missing_service_still_carries_method_and_affidavit_risks() -> None:
     computed_reason = next(
         f.reason for f in computed_split.flags if f.code is FlagCode.TACK_AND_MAIL_DATE_SPLIT
     )
-    assert "is used for computation" in computed_reason
+    assert "starting point for computation" in computed_reason
+
+
+def test_coverage_gap_split_reason_never_claims_a_finalized_computation() -> None:
+    # Round-9 finding: intake risks are flagged before the terminal roll can
+    # refuse, so the split reason must stay outcome-neutral. Service Dec 25
+    # hits the calendar coverage gap (computed None) with split components.
+    result = compute(
+        make_case(
+            date(2026, 12, 25),
+            ServiceMethod.TACK_AND_MAIL,
+            posting_date=date(2026, 12, 24),
+            mailing_date=date(2026, 12, 26),
+        )
+    )
+    assert result.computed_deadline is None
+    assert FlagCode.CALENDAR_COVERAGE_GAP in flag_codes(result)
+    assert FlagCode.TACK_AND_MAIL_DATE_SPLIT in flag_codes(result)
+    reason = next(f.reason for f in result.flags if f.code is FlagCode.TACK_AND_MAIL_DATE_SPLIT)
+    assert "is used for computation" not in reason
+    assert "starting point for computation" in reason
+
+
+def test_rolling_holiday_warning_makes_no_summons_claim_without_a_summons() -> None:
+    # Round-9 finding: the roll-time divergence warning used to assert that
+    # a summons-stated date controls even when no summons exists.
+    result = compute(make_case(date(2026, 3, 27)))
+    assert result.deadline_basis is DeadlineBasis.COMPUTED
+    reason = next(f.reason for f in result.flags if f.code is FlagCode.STATE_HOLIDAY_COURT_OPEN)
+    assert "Summons-stated date controls" not in reason
+    assert "confirm the operative date" in reason
 
     unknown = compute(make_case(None, ServiceMethod.UNKNOWN))
     assert FlagCode.UNKNOWN_SERVICE_METHOD in flag_codes(unknown)

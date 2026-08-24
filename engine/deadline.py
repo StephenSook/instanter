@@ -238,8 +238,9 @@ def _roll_terminal_day(
                         FlagCode.STATE_HOLIDAY_COURT_OPEN,
                         f"{day.isoformat()} is a Georgia legal holiday, but the "
                         "Fulton courthouse is open that day. The statute rolls "
-                        "the deadline; the summons keys to 'Court holiday'. "
-                        "Summons-stated date controls for the tenant.",
+                        "the deadline past it, while the Fulton summons keys "
+                        "its roll to 'Court holiday'; the calendars diverge "
+                        "here and an attorney must confirm the operative date.",
                         day=day,
                     )
                 )
@@ -265,11 +266,13 @@ def _flag_intake_risks(case: CaseInput, rule: JurisdictionRule, flags: list[Flag
             and case.mailing_date is not None
             and case.posting_date != case.mailing_date
         ):
-            # Refusal-aware wording: on the missing-service path no date was
-            # used for anything, and saying otherwise would mislead the
-            # reviewing attorney about whether a deadline was calculated.
+            # Outcome-neutral wording: this helper runs before the terminal
+            # roll, which can still refuse (calendar coverage gap), so the
+            # reason must never claim a finalized computation. It states the
+            # starting point when a service date exists and states the
+            # refusal when none does.
             consequence = (
-                "the entered service date is used for computation"
+                "the entered service date is the starting point for computation"
                 if case.service_date is not None
                 else "no deadline was computed because the service date is unconfirmed"
             )
