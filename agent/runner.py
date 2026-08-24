@@ -17,11 +17,12 @@ import json
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from agent.audit import AuditEvent, JsonlAuditSink
 from agent.models import EscalationRationale
 from agent.run_context import RunContext
-from agent.store import EscalationRecord, JsonFileCaseStore
+from agent.store import JsonFileCaseStore
 from agent.tools import build_tools
 from agent.triage import TriageDecision
 
@@ -35,6 +36,7 @@ class RunReport:
     committed: tuple[str, ...]
     attorney_action: str
     audit_path: str
+    backstop_used: bool = False
 
 
 def _load_records(ctx: RunContext) -> None:
@@ -54,15 +56,35 @@ def _load_records(ctx: RunContext) -> None:
     )
 
 
-def run_deterministic(ctx: RunContext, attorney_response: str = "approve") -> RunReport:
-    """Model-free end-to-end run: engine + ladder + escalation writes."""
-    _load_records(ctx)
-    tools = build_tools(ctx)
-    # The same tool the writer agent calls, invoked directly: deterministic
-    # by construction, and the audit trail is identical in shape.
-    tools["get_ranked_queue"]()
+def _apply_attorney_decision(ctx: RunContext, tools: dict[str, Any], response: str) -> None:
+    """Execute the attorney's decision through the same commit tool the
+    writer agent calls: one code path for store writes, partial-failure
+    handling, and audit events."""
+    if response.strip().lower().startswith("approve"):
+        ctx.attorney_action = "approved"
+        tools["commit_escalations"]()
+    else:
+        ctx.attorney_action = "deferred"
+        ctx.audit.append(
+            AuditEvent(
+                kind="attorney_decision",
+                case_id=None,
+                payload={"action": "deferred", "detail": response},
+                run_id=ctx.run_id,
+            )
+        )
 
+
+def _deterministic_floor(ctx: RunContext, tools: dict[str, Any], attorney_response: str) -> None:
+    """The part of the sweep that must NEVER depend on model discretion:
+    compute every deadline, rank the queue, put every interrupt-now case in
+    front of the attorney (template rationale if the model never wrote one),
+    and execute the attorney's decision."""
+    if not ctx.decisions:
+        tools["get_ranked_queue"]()
     for decision in ctx.interrupt_candidates:
+        if decision.case_id in ctx.rationales:
+            continue
         ctx.rationales[decision.case_id] = _template_rationale(decision)
         ctx.audit.append(
             AuditEvent(
@@ -72,53 +94,29 @@ def run_deterministic(ctx: RunContext, attorney_response: str = "approve") -> Ru
                 run_id=ctx.run_id,
             )
         )
+    if ctx.interrupt_candidates:
+        _apply_attorney_decision(ctx, tools, attorney_response)
 
-    if attorney_response.strip().lower().startswith("approve"):
-        ctx.attorney_action = "approved"
-        committed: list[str] = []
-        for decision in ctx.interrupt_candidates:
-            rationale = ctx.rationales[decision.case_id]
-            ctx.store.record_escalation(
-                EscalationRecord(
-                    case_id=decision.case_id,
-                    disposition=decision.level.value,
-                    rank=decision.rank,
-                    factors=decision.factors,
-                    rationale=rationale.rationale,
-                    confidence=rationale.confidence,
-                    run_id=ctx.run_id,
-                )
-            )
-            committed.append(decision.case_id)
-        ctx.committed_case_ids = tuple(committed)
-        ctx.audit.append(
-            AuditEvent(
-                kind="escalation_committed",
-                case_id=None,
-                payload={"cases": committed, "attorney_action": "approved"},
-                run_id=ctx.run_id,
-            )
-        )
-    else:
-        ctx.attorney_action = "deferred"
-        ctx.audit.append(
-            AuditEvent(
-                kind="attorney_decision",
-                case_id=None,
-                payload={"action": "deferred", "detail": attorney_response},
-                run_id=ctx.run_id,
-            )
-        )
 
+def run_deterministic(ctx: RunContext, attorney_response: str = "approve") -> RunReport:
+    """Model-free end-to-end run: engine + ladder + escalation writes."""
+    _load_records(ctx)
+    tools = build_tools(ctx)
+    _deterministic_floor(ctx, tools, attorney_response)
     return _report(ctx, mode="deterministic")
 
 
-def run_live(ctx: RunContext, attorney_response: str = "approve") -> RunReport:
+def run_live(
+    ctx: RunContext,
+    attorney_response: str = "approve",
+    plugins: list[Any] | None = None,
+) -> RunReport:
     """Full graph run with the attorney interrupt resumed in-session.
 
     The multi-day persist-and-reinvoke wait ships with the Phase C
     infrastructure; here the attorney's response arrives as an argument
     (the console supplies it interactively in the deployed product).
+    ``plugins`` passes through to the graph for the evals chaos harness.
     """
     from strands.multiagent import Status
     from strands.types.interrupt import InterruptResponseContent
@@ -126,7 +124,7 @@ def run_live(ctx: RunContext, attorney_response: str = "approve") -> RunReport:
     from agent.graph import build_triage_graph
 
     _load_records(ctx)
-    graph = build_triage_graph(ctx)
+    graph = build_triage_graph(ctx, plugins=plugins)
     result = graph(
         "Run the unattended triage sweep for this intake queue: analyze "
         "notes, rank deterministically, escalate through attorney approval."
@@ -142,15 +140,43 @@ def run_live(ctx: RunContext, attorney_response: str = "approve") -> RunReport:
             for interrupt in result.interrupts
         ]
         result = graph(responses)
+
+    # Deterministic floor: chaos testing showed the model layer can end a
+    # run without ever reaching the attorney (a node dies, or the writer
+    # declines to act when upstream context is degraded). Undertriage is
+    # the catastrophic error, so if no attorney decision was recorded, the
+    # runner itself completes the sweep deterministically, loudly audited.
+    backstop_used = False
+    if not ctx.attorney_action:
+        tools = build_tools(ctx)
+        if ctx.interrupt_candidates or not ctx.decisions:
+            backstop_used = True
+            ctx.audit.append(
+                AuditEvent(
+                    kind="deterministic_backstop",
+                    case_id=None,
+                    payload={
+                        "graph_status": str(result.status),
+                        "had_ranked_queue": bool(ctx.decisions),
+                        "reason": (
+                            "model layer ended the run without an attorney "
+                            "decision; completing the sweep deterministically"
+                        ),
+                    },
+                    run_id=ctx.run_id,
+                )
+            )
+            _deterministic_floor(ctx, tools, attorney_response)
+
     ctx.audit.append(
         AuditEvent(
             kind="run_finished",
             case_id=None,
-            payload={"status": str(result.status)},
+            payload={"status": str(result.status), "backstop_used": backstop_used},
             run_id=ctx.run_id,
         )
     )
-    return _report(ctx, mode="live")
+    return _report(ctx, mode="live", backstop_used=backstop_used)
 
 
 def _template_rationale(decision: TriageDecision) -> EscalationRationale:
@@ -166,7 +192,7 @@ def _template_rationale(decision: TriageDecision) -> EscalationRationale:
     )
 
 
-def _report(ctx: RunContext, mode: str) -> RunReport:
+def _report(ctx: RunContext, mode: str, backstop_used: bool = False) -> RunReport:
     return RunReport(
         run_id=ctx.run_id,
         mode=mode,
@@ -175,6 +201,7 @@ def _report(ctx: RunContext, mode: str) -> RunReport:
         committed=ctx.committed_case_ids,
         attorney_action=ctx.attorney_action,
         audit_path="",
+        backstop_used=backstop_used,
     )
 
 
@@ -222,6 +249,7 @@ def main() -> None:
                 "interrupts": list(report.interrupts),
                 "committed": list(report.committed),
                 "attorney_action": report.attorney_action,
+                "backstop_used": report.backstop_used,
             },
             indent=2,
         )

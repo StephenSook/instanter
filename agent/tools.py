@@ -18,7 +18,7 @@ from strands import tool
 from agent.audit import AuditEvent
 from agent.models import EscalationRationale, ExtractedObservations
 from agent.run_context import RunContext
-from agent.store import EscalationRecord, to_case_input
+from agent.store import EscalationRecord, IntakeParseError, to_case_input
 from agent.triage import TriageCase, triage_queue
 from engine.deadline import compute_deadline
 from engine.rules import RULES
@@ -120,16 +120,33 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         factors, flags, observation_summary}.
         """
         cases: list[TriageCase] = []
+        refused: list[dict[str, str]] = []
         for record in ctx.records.values():
+            try:
+                case_input = to_case_input(record)
+            except IntakeParseError as exc:
+                # One malformed row must never kill the unattended sweep of
+                # the rows that parsed. It becomes a case-level refusal a
+                # human resolves, loudly audited, surfaced in the output.
+                refused.append({"case_id": record.case_id, "reason": str(exc)})
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="case_refused",
+                        case_id=record.case_id,
+                        payload={"reason": str(exc)},
+                        run_id=ctx.run_id,
+                    )
+                )
+                continue
             rule = RULES.get(record.jurisdiction_id)
             if rule is None:
                 # Refusal is a case-level fact, not a crash: unsupported rows
                 # surface for a human with no computed deadline.
                 from engine.rules import GEORGIA_RULE
 
-                result = compute_deadline(to_case_input(record), GEORGIA_RULE)
+                result = compute_deadline(case_input, GEORGIA_RULE)
             else:
-                result = compute_deadline(to_case_input(record), rule)
+                result = compute_deadline(case_input, rule)
             ctx.deadlines[record.case_id] = result
             ctx.audit.append(
                 AuditEvent(
@@ -190,6 +207,7 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 "run_date": ctx.run_date.isoformat(),
                 "attorney_capacity": ctx.attorney_capacity,
                 "queue": rows,
+                "refused_cases": refused,
             }
         )
 
@@ -269,18 +287,46 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         committed: list[str] = []
         for decision in ctx.interrupt_candidates:
             rationale = ctx.rationales[decision.case_id]
-            ctx.store.record_escalation(
-                EscalationRecord(
-                    case_id=decision.case_id,
-                    disposition=decision.level.value,
-                    rank=decision.rank,
-                    factors=decision.factors,
-                    rationale=rationale.rationale,
-                    confidence=rationale.confidence,
-                    run_id=ctx.run_id,
-                    status="pending_attorney",
+            try:
+                ctx.store.record_escalation(
+                    EscalationRecord(
+                        case_id=decision.case_id,
+                        disposition=decision.level.value,
+                        rank=decision.rank,
+                        factors=decision.factors,
+                        rationale=rationale.rationale,
+                        confidence=rationale.confidence,
+                        run_id=ctx.run_id,
+                        status="pending_attorney",
+                    )
                 )
-            )
+            except Exception as exc:
+                # A store failure mid-commit must never pass silently: audit
+                # exactly what was and was not written, surface it to the
+                # attorney path, and do not pretend the set committed.
+                ctx.committed_case_ids = tuple(committed)
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="store_write_failed",
+                        case_id=decision.case_id,
+                        payload={
+                            "error": str(exc)[:300],
+                            "written": committed,
+                            "not_written": [
+                                d.case_id
+                                for d in ctx.interrupt_candidates
+                                if d.case_id not in committed
+                            ],
+                        },
+                        run_id=ctx.run_id,
+                    )
+                )
+                return (
+                    f"STORE WRITE FAILED on {decision.case_id}: {exc}. "
+                    f"Written before failure: {', '.join(committed) or 'none'}. "
+                    "The remaining escalations were NOT committed; staff must "
+                    "review the escalation store before any retry."
+                )
             committed.append(decision.case_id)
         ctx.committed_case_ids = tuple(committed)
         ctx.audit.append(

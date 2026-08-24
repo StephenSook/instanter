@@ -76,10 +76,14 @@ DRAFTER_PROMPT = (
 ) + _BOUNDARY
 
 
-def build_triage_graph(ctx: RunContext) -> Graph:
+def build_triage_graph(ctx: RunContext, plugins: list[Any] | None = None) -> Graph:
+    """Build the graph. ``plugins`` exists for the evals harness (chaos
+    injection attaches as a standard Strands plugin); production passes
+    none."""
     tools = build_tools(ctx)
     audit_hook = AuditToolHook(ctx)
     approval_hook = AttorneyApprovalHook(ctx)
+    shared_plugins = plugins or []
 
     analyst = Agent(
         name="notes_analyst",
@@ -87,6 +91,7 @@ def build_triage_graph(ctx: RunContext) -> Graph:
         system_prompt=ANALYST_PROMPT,
         tools=[tools["list_cases_with_notes"], tools["submit_case_observations"]],
         hooks=[audit_hook],
+        plugins=list(shared_plugins),
         callback_handler=None,
     )
     writer = Agent(
@@ -99,6 +104,7 @@ def build_triage_graph(ctx: RunContext) -> Graph:
             tools["commit_escalations"],
         ],
         hooks=[audit_hook, approval_hook],
+        plugins=list(shared_plugins),
         callback_handler=None,
     )
     drafter = Agent(
@@ -107,6 +113,7 @@ def build_triage_graph(ctx: RunContext) -> Graph:
         system_prompt=DRAFTER_PROMPT,
         tools=[tools["write_packet_memo"]],
         hooks=[audit_hook],
+        plugins=list(shared_plugins),
         callback_handler=None,
     )
 

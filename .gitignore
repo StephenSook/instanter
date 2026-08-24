@@ -55,3 +55,6 @@ playwright-report/
 test-results/
 .coverage
 .uv-cache/
+
+# evals transient per-case run outputs (latest.json IS tracked)
+evals/results/runs/

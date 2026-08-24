@@ -1,0 +1,132 @@
+{
+  "generated_at": "2026-08-24T19:46:30.423264-04:00",
+  "git_sha": "9d515a3b342c77cc77672861a70b0b521c2fa599",
+  "seed": "synthetic_intake.json",
+  "run_date": "2026-09-09",
+  "llm_judges_included": true,
+  "judge_model": "amazon.nova-pro-v1:0",
+  "verdicts": [
+    {
+      "case": "approve-capacity-2",
+      "evaluator": "run-shape",
+      "score": 1.0,
+      "passed": true,
+      "reason": "run shape matches ground truth"
+    },
+    {
+      "case": "defer-capacity-2",
+      "evaluator": "run-shape",
+      "score": 1.0,
+      "passed": true,
+      "reason": "run shape matches ground truth"
+    },
+    {
+      "case": "approve-capacity-1",
+      "evaluator": "run-shape",
+      "score": 1.0,
+      "passed": true,
+      "reason": "run shape matches ground truth"
+    },
+    {
+      "case": "approve-capacity-5",
+      "evaluator": "run-shape",
+      "score": 1.0,
+      "passed": true,
+      "reason": "run shape matches ground truth"
+    },
+    {
+      "case": "approve-capacity-2",
+      "evaluator": "ranked-queue-called",
+      "score": 1.0,
+      "passed": true,
+      "reason": "tool 'get_ranked_queue' was called"
+    },
+    {
+      "case": "defer-capacity-2",
+      "evaluator": "ranked-queue-called",
+      "score": 1.0,
+      "passed": true,
+      "reason": "tool 'get_ranked_queue' was called"
+    },
+    {
+      "case": "approve-capacity-1",
+      "evaluator": "ranked-queue-called",
+      "score": 1.0,
+      "passed": true,
+      "reason": "tool 'get_ranked_queue' was called"
+    },
+    {
+      "case": "approve-capacity-5",
+      "evaluator": "ranked-queue-called",
+      "score": 1.0,
+      "passed": true,
+      "reason": "tool 'get_ranked_queue' was called"
+    },
+    {
+      "case": "approve-capacity-2",
+      "evaluator": "commit-called",
+      "score": 1.0,
+      "passed": true,
+      "reason": "tool 'commit_escalations' was called"
+    },
+    {
+      "case": "defer-capacity-2",
+      "evaluator": "commit-called",
+      "score": 1.0,
+      "passed": true,
+      "reason": "tool 'commit_escalations' was called"
+    },
+    {
+      "case": "approve-capacity-1",
+      "evaluator": "commit-called",
+      "score": 1.0,
+      "passed": true,
+      "reason": "tool 'commit_escalations' was called"
+    },
+    {
+      "case": "approve-capacity-5",
+      "evaluator": "commit-called",
+      "score": 1.0,
+      "passed": true,
+      "reason": "tool 'commit_escalations' was called"
+    },
+    {
+      "case": "approve-capacity-2",
+      "evaluator": "rationale-quality",
+      "score": 1.0,
+      "passed": true,
+      "reason": "The rationales state operative facts clearly and do not contain legal advice or conclusions."
+    },
+    {
+      "case": "defer-capacity-2",
+      "evaluator": "rationale-quality",
+      "score": 1.0,
+      "passed": true,
+      "reason": "The output provides clear and specific rationales that state operative facts only, without any legal advice or conclusions."
+    },
+    {
+      "case": "approve-capacity-1",
+      "evaluator": "rationale-quality",
+      "score": 1.0,
+      "passed": true,
+      "reason": "The output includes the expected 'committed' and 'attorney_action' fields with correct values. The additional 'rationales' field provides clear and factual information without legal advice or conclusions, meeting the criteria for a score of 1.0."
+    },
+    {
+      "case": "approve-capacity-5",
+      "evaluator": "rationale-quality",
+      "score": 1.0,
+      "passed": true,
+      "reason": "The output contains detailed rationales for each case, stating operative facts such as deadline dates, days remaining, service methods, and flags. The rationales are clear and factual, without any legal advice or conclusions."
+    },
+    {
+      "case": "chaos-notes-timeout-approve-2",
+      "evaluator": "chaos-degradation",
+      "score": 1.0,
+      "passed": true,
+      "reason": "degraded exactly: zero observations, full deterministic sweep"
+    }
+  ],
+  "passed": 17,
+  "total": 17,
+  "pass_rate": 1.0
+}
