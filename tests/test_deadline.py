@@ -646,6 +646,8 @@ def test_mismatched_rule_reason_names_both_identifiers() -> None:
 
 def test_non_georgia_rule_emits_no_georgia_or_fulton_claims() -> None:
     # Round-11 finding: divergence warnings hardcoded Georgia and Fulton.
+    # Round-12 sharpening: an unconfigured rule must also make no claim
+    # about what calendar the summons keys its roll to.
     rule = _make_rule(jurisdiction_id="TX-HARRIS")
     case = CaseInput(
         case_id="X",
@@ -658,6 +660,39 @@ def test_non_georgia_rule_emits_no_georgia_or_fulton_claims() -> None:
     assert "Georgia" not in reason
     assert "Fulton" not in reason
     assert "this jurisdiction" in reason
+    assert "summons keys its roll" not in reason  # unconfigured legal assertion
+
+
+def test_mismatched_rule_exposes_no_supplied_rule_authority() -> None:
+    # Round-12 finding: the mismatch refusal copied the supplied rule's
+    # citation, contaminating the result with the wrong state's statutes.
+    case = CaseInput(
+        case_id="X",
+        jurisdiction_id="TX-HARRIS",
+        service_date=date(2026, 8, 10),
+        service_method=ServiceMethod.PERSONAL,
+    )
+    result = compute_deadline(case, GEORGIA_RULE)
+    assert result.citation == ""
+
+
+def test_non_georgia_summons_conflict_cites_no_georgia_statute() -> None:
+    # Round-12 finding: the conflict warning hardcoded O.C.G.A. authority.
+    rule = _make_rule(jurisdiction_id="TX-HARRIS")
+    case = CaseInput(
+        case_id="X",
+        jurisdiction_id="TX-HARRIS",
+        service_date=date(2026, 8, 10),
+        service_method=ServiceMethod.PERSONAL,
+        summons_stated_deadline=date(2026, 8, 18),
+    )
+    result = compute_deadline(case, rule)
+    reason = next(f.reason for f in result.flags if f.code is FlagCode.SUMMONS_DATE_CONFLICT)
+    assert "O.C.G.A." not in reason
+    # And the Georgia row keeps its configured authority.
+    ga = compute(make_case(date(2026, 8, 10), summons_stated_deadline=date(2026, 8, 18)))
+    ga_reason = next(f.reason for f in ga.flags if f.code is FlagCode.SUMMONS_DATE_CONFLICT)
+    assert "O.C.G.A. 44-7-51(b)" in ga_reason
 
 
 def test_rolling_holiday_warning_makes_no_summons_claim_without_a_summons() -> None:
