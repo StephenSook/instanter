@@ -15,7 +15,13 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from engine.deadline import CaseInput, DeadlineResult, FlagCode, compute_deadline
+from engine.deadline import (
+    CaseInput,
+    DeadlineBasis,
+    DeadlineResult,
+    FlagCode,
+    compute_deadline,
+)
 from engine.rules import (
     GEORGIA_RULE,
     CountingBasis,
@@ -142,7 +148,9 @@ def test_dec_31_trap_does_not_roll_and_flags() -> None:
     result = compute(make_case(date(2026, 12, 24)))
     assert result.computed_deadline == date(2026, 12, 31)
     assert FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY in flag_codes(result)
-    assert result.court_reopens_on == date(2027, 1, 4)
+    # Closure coverage ends 2027-01-01, so the reopening date is unknowable
+    # from encoded data and must be None, never a guess.
+    assert result.court_reopens_on is None
     assert result.needs_human_review
 
 
@@ -255,6 +263,65 @@ def test_trace_starts_at_service_and_ends_at_deadline() -> None:
     assert result.trace[0].day == date(2026, 6, 26)
     assert "day 0" in result.trace[0].label
     assert result.trace[-1].day == date(2026, 7, 6)
+
+
+# --- Fail-closed regressions (adversarial-review findings, 2026-08-24) -------
+
+
+def test_coverage_gap_with_summons_is_labeled_unverified() -> None:
+    # A refused computation must never launder a summons date into a
+    # finalized-looking deadline: the basis says exactly what it rests on.
+    result = compute(make_case(date(2026, 12, 25), summons_stated_deadline=date(2027, 1, 4)))
+    assert result.computed_deadline is None
+    assert result.computation_refused
+    assert result.effective_deadline == date(2027, 1, 4)  # summons controls for the tenant
+    assert result.deadline_basis is DeadlineBasis.SUMMONS_ONLY_UNVERIFIED
+    assert FlagCode.CALENDAR_COVERAGE_GAP in flag_codes(result)
+
+
+@pytest.mark.parametrize(
+    ("case_kwargs", "expected_basis"),
+    [
+        ({}, DeadlineBasis.COMPUTED),
+        ({"summons_stated_deadline": date(2026, 8, 17)}, DeadlineBasis.SUMMONS_CONFIRMS),
+        ({"summons_stated_deadline": date(2026, 8, 18)}, DeadlineBasis.SUMMONS_CONTROLS),
+    ],
+)
+def test_deadline_basis_reflects_provenance(
+    case_kwargs: dict[str, object], expected_basis: DeadlineBasis
+) -> None:
+    result = compute(make_case(date(2026, 8, 10), **case_kwargs))  # type: ignore[arg-type]
+    assert result.deadline_basis is expected_basis
+
+
+def test_missing_service_with_summons_is_unverified_basis() -> None:
+    result = compute(make_case(None, summons_stated_deadline=date(2026, 8, 18)))
+    assert result.deadline_basis is DeadlineBasis.SUMMONS_ONLY_UNVERIFIED
+    assert result.computation_refused
+
+
+def test_malformed_rule_rows_fail_closed_at_construction() -> None:
+    # A serialized string in an enum field must raise, never skip the roll.
+    base = {
+        "jurisdiction_id": "XX-BAD",
+        "citation_string": "n/a",
+        "window_length_days": 7,
+        "counting_basis": CountingBasis.DAY_OF_SERVICE_EXCLUDED,
+        "intermediate_days_counted": True,
+        "terminal_roll": TerminalRoll.NEXT_NON_WEEKEND_NON_HOLIDAY,
+        "calendar": GEORGIA_RULE.calendar,
+        "tack_and_mail_money_judgment_note": "n/a",
+        "tender_window_days": None,
+        "deadline_time_of_day": "17:00",
+        "deadline_timezone": "America/New_York",
+        "notes": "",
+    }
+    with pytest.raises(TypeError):
+        JurisdictionRule(**{**base, "terminal_roll": "next_non_weekend_non_holiday"})  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        JurisdictionRule(**{**base, "counting_basis": "day_of_service_excluded"})  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="window_length_days"):
+        JurisdictionRule(**{**base, "window_length_days": 0})  # type: ignore[arg-type]
 
 
 # --- Jurisdiction-table extensibility ----------------------------------------
