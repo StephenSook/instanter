@@ -32,6 +32,7 @@ class FlagCode(Enum):
     UNKNOWN_SERVICE_METHOD = "unknown_service_method"
     TACK_AND_MAIL_REVIEW = "tack_and_mail_review"
     TACK_AND_MAIL_DATE_SPLIT = "tack_and_mail_date_split"
+    TACK_AND_MAIL_SERVICE_MISMATCH = "tack_and_mail_service_mismatch"
     AMENDED_AFFIDAVIT = "amended_affidavit"
     SUMMONS_DATE_CONFLICT = "summons_date_conflict"
     COURT_CLOSED_NOT_LEGAL_HOLIDAY = "court_closed_not_legal_holiday"
@@ -149,6 +150,57 @@ def _next_court_open_day(rule: JurisdictionRule, start: date) -> date | None:
     return None
 
 
+def _flag_effective_date_anomalies(
+    rule: JurisdictionRule, effective: date, flags: list[Flag]
+) -> date | None:
+    """Calendar-divergence checks on the FINAL effective deadline.
+
+    Runs after summons resolution on every path that produces an effective
+    date, so a summons-stated December 31 (closed clerk) or April 3 (legal
+    holiday, courthouse open) raises its specific hazard instead of hiding
+    behind a generic conflict or missing-service flag. Returns the
+    court-reopens advisory date when the clerk is closed on the effective day.
+
+    Only checkable when the holiday calendar covers the date; closure
+    coverage is guaranteed to reach at least that far by construction.
+    """
+    if not rule.calendar.holiday_knowledge_covers(effective):
+        return None
+    existing = {f.code for f in flags}
+    if rule.calendar.is_court_closure(effective) and not rule.calendar.is_legal_holiday(effective):
+        court_reopens = _next_court_open_day(rule, effective)
+        reopen_text = (
+            f" The clerk's office next opens {court_reopens.isoformat()}." if court_reopens else ""
+        )
+        flags.append(
+            Flag(
+                FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY,
+                f"Last day to answer {effective.isoformat()} is a courthouse "
+                "closure that is NOT a Georgia legal holiday, so the "
+                "statute does not roll it forward, and absent a judicial "
+                "emergency order there is no automatic extension. An "
+                f"attorney must resolve this date.{reopen_text}",
+            )
+        )
+        return court_reopens
+    if (
+        rule.calendar.is_legal_holiday(effective)
+        and not rule.calendar.is_court_closure(effective)
+        and FlagCode.STATE_HOLIDAY_COURT_OPEN not in existing
+    ):
+        flags.append(
+            Flag(
+                FlagCode.STATE_HOLIDAY_COURT_OPEN,
+                f"Last day to answer {effective.isoformat()} is a Georgia "
+                "legal holiday on which the Fulton courthouse is open. The "
+                "statute treats it as a non-answer day and would roll past "
+                "it; the calendars diverge here and an attorney must resolve "
+                "which date controls.",
+            )
+        )
+    return None
+
+
 def _roll_terminal_day(
     rule: JurisdictionRule, candidate: date, trace: list[TraceStep], flags: list[Flag]
 ) -> date | None:
@@ -221,21 +273,30 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
         )
 
     if case.service_date is None:
+        missing_flags: list[Flag] = [
+            Flag(
+                FlagCode.SERVICE_DATE_MISSING,
+                "Service date unknown or disputed; refusing to compute a "
+                "binding deadline. If the summons states a last day to "
+                "answer, that date controls for the tenant.",
+            )
+        ]
+        # The effective-date hazard checks still apply to a summons-only
+        # date: a summons stating a closed-clerk day must raise that
+        # specific danger even when the computation is refused.
+        missing_reopens: date | None = None
+        if case.summons_stated_deadline is not None:
+            missing_reopens = _flag_effective_date_anomalies(
+                rule, case.summons_stated_deadline, missing_flags
+            )
         return DeadlineResult(
             case_id=case.case_id,
             computed_deadline=None,
             effective_deadline=case.summons_stated_deadline,
             deadline_at=None,
             tender_deadline=None,
-            court_reopens_on=None,
-            flags=(
-                Flag(
-                    FlagCode.SERVICE_DATE_MISSING,
-                    "Service date unknown or disputed; refusing to compute a "
-                    "binding deadline. If the summons states a last day to "
-                    "answer, that date controls for the tenant.",
-                ),
-            ),
+            court_reopens_on=missing_reopens,
+            flags=tuple(missing_flags),
             deadline_basis=(
                 DeadlineBasis.SUMMONS_ONLY_UNVERIFIED
                 if case.summons_stated_deadline is not None
@@ -261,6 +322,23 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
                     "must confirm which date starts the clock.",
                 )
             )
+        else:
+            # Component dates that agree with each other (or a single known
+            # component) can still contradict the entered service date; a
+            # mapping or intake error would otherwise move the deadline with
+            # no warning at all.
+            component = case.posting_date if case.posting_date is not None else case.mailing_date
+            if component is not None and component != case.service_date:
+                flags.append(
+                    Flag(
+                        FlagCode.TACK_AND_MAIL_SERVICE_MISMATCH,
+                        f"Tack-and-mail component date {component.isoformat()} "
+                        "does not match the entered service date "
+                        f"{case.service_date.isoformat()}. The entered service "
+                        "date is used for computation, and an attorney must "
+                        "confirm which date starts the clock.",
+                    )
+                )
     elif case.service_method is ServiceMethod.UNKNOWN:
         flags.append(
             Flag(
@@ -329,33 +407,14 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
                 )
             )
 
-    # Closed-clerk anomaly check runs on the EFFECTIVE deadline, after
-    # summons resolution: a summons stating December 31 must raise the
-    # closed-courthouse hazard even when the computed date was fine, or the
-    # specific danger hides behind a generic conflict warning. Only checkable
-    # when the holiday calendar covers the date (closure coverage is
-    # guaranteed at least as long by construction).
+    # Calendar-divergence checks run on the EFFECTIVE deadline, after summons
+    # resolution, in both directions: a summons stating December 31 raises
+    # the closed-clerk hazard, and one stating April 3 or October 12 raises
+    # the holiday-but-court-open divergence, instead of either hiding behind
+    # the generic conflict flag.
     court_reopens: date | None = None
-    if (
-        effective is not None
-        and rule.calendar.holiday_knowledge_covers(effective)
-        and rule.calendar.is_court_closure(effective)
-        and not rule.calendar.is_legal_holiday(effective)
-    ):
-        court_reopens = _next_court_open_day(rule, effective)
-        reopen_text = (
-            f" The clerk's office next opens {court_reopens.isoformat()}." if court_reopens else ""
-        )
-        flags.append(
-            Flag(
-                FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY,
-                f"Last day to answer {effective.isoformat()} is a courthouse "
-                "closure that is NOT a Georgia legal holiday, so the "
-                "statute does not roll it forward, and absent a judicial "
-                "emergency order there is no automatic extension. An "
-                f"attorney must resolve this date.{reopen_text}",
-            )
-        )
+    if effective is not None:
+        court_reopens = _flag_effective_date_anomalies(rule, effective, flags)
 
     # Invariant: a precise timestamp exists ONLY when the statutory
     # computation completed. An unverified summons-only date keeps its
