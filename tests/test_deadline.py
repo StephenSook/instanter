@@ -276,7 +276,21 @@ def test_coverage_gap_with_summons_is_labeled_unverified() -> None:
     assert result.computation_refused
     assert result.effective_deadline == date(2027, 1, 4)  # summons controls for the tenant
     assert result.deadline_basis is DeadlineBasis.SUMMONS_ONLY_UNVERIFIED
+    assert result.deadline_at is None  # no clock time on an unverified date
     assert FlagCode.CALENDAR_COVERAGE_GAP in flag_codes(result)
+
+
+def test_unverified_summons_projects_identically_from_both_refusal_paths() -> None:
+    # Same provenance state, same projection, whichever refusal produced it.
+    via_coverage_gap = compute(
+        make_case(date(2026, 12, 25), summons_stated_deadline=date(2027, 1, 4))
+    )
+    via_missing_service = compute(make_case(None, summons_stated_deadline=date(2027, 1, 4)))
+    for result in (via_coverage_gap, via_missing_service):
+        assert result.deadline_basis is DeadlineBasis.SUMMONS_ONLY_UNVERIFIED
+        assert result.computed_deadline is None
+        assert result.effective_deadline == date(2027, 1, 4)
+        assert result.deadline_at is None
 
 
 @pytest.mark.parametrize(
@@ -322,6 +336,51 @@ def test_malformed_rule_rows_fail_closed_at_construction() -> None:
         JurisdictionRule(**{**base, "counting_basis": "day_of_service_excluded"})  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="window_length_days"):
         JurisdictionRule(**{**base, "window_length_days": 0})  # type: ignore[arg-type]
+    # bool is a subclass of int: True must not slip in as a one-day window.
+    with pytest.raises(ValueError, match="window_length_days"):
+        JurisdictionRule(**{**base, "window_length_days": True})  # type: ignore[arg-type]
+    # The engine only implements calendar-day intermediates; a row claiming
+    # otherwise would be silently miscomputed, so it must refuse.
+    with pytest.raises(NotImplementedError):
+        JurisdictionRule(**{**base, "intermediate_days_counted": False})  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="tender_window_days"):
+        JurisdictionRule(**{**base, "tender_window_days": 0})  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="tender_window_days"):
+        JurisdictionRule(**{**base, "tender_window_days": True})  # type: ignore[arg-type]
+
+
+def test_next_court_open_day_inspects_the_coverage_boundary_itself() -> None:
+    # closure_coverage_end is INCLUSIVE: the boundary date itself is still
+    # covered data and may be returned as an open day. A wrong >= guard would
+    # refuse on the boundary and return None here, so this test pins the
+    # exact off-by-one the December 31 case cannot distinguish.
+    from engine.deadline import _next_court_open_day
+    from engine.holidays import HolidayCalendar
+
+    calendar = HolidayCalendar(
+        legal_holidays=frozenset(),
+        court_closures=frozenset({date(2026, 6, 1), date(2026, 6, 2)}),
+        holiday_coverage_start=date(2026, 1, 1),
+        holiday_coverage_end=date(2026, 12, 31),
+        closure_coverage_end=date(2026, 6, 3),  # Wed, open weekday, the boundary
+    )
+    rule = JurisdictionRule(
+        jurisdiction_id="XX-BOUNDARY",
+        citation_string="n/a",
+        window_length_days=7,
+        counting_basis=CountingBasis.DAY_OF_SERVICE_EXCLUDED,
+        intermediate_days_counted=True,
+        terminal_roll=TerminalRoll.NEXT_NON_WEEKEND_NON_HOLIDAY,
+        calendar=calendar,
+        tack_and_mail_money_judgment_note="n/a",
+        tender_window_days=None,
+        deadline_time_of_day="17:00",
+        deadline_timezone="America/New_York",
+        notes="",
+    )
+    assert _next_court_open_day(rule, date(2026, 6, 1)) == date(2026, 6, 3)
+    # And one past the boundary is unknown territory: None, never a guess.
+    assert _next_court_open_day(rule, date(2026, 6, 3)) is None
 
 
 # --- Jurisdiction-table extensibility ----------------------------------------

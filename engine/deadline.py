@@ -330,8 +330,14 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
                 )
             )
 
+    # Invariant: a precise timestamp exists ONLY when the statutory
+    # computation completed. An unverified summons-only date keeps its
+    # calendar date in effective_deadline but never gets a clock time a
+    # scheduler could mistake for a finalized deadline; this matches the
+    # missing-service-date path, so identical provenance states project
+    # identically regardless of which refusal produced them.
     deadline_at: datetime | None = None
-    if effective is not None:
+    if effective is not None and computed is not None:
         hour, minute = (int(p) for p in rule.deadline_time_of_day.split(":"))
         deadline_at = datetime.combine(
             effective, time(hour, minute), tzinfo=ZoneInfo(rule.deadline_timezone)

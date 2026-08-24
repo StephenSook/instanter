@@ -42,6 +42,11 @@ def test_dec_31_is_closure_but_not_holiday() -> None:
     assert not GEORGIA_2026_CALENDAR.is_legal_holiday(d)
 
 
+def test_new_years_2027_is_encoded_as_closure_and_is_the_coverage_boundary() -> None:
+    assert GEORGIA_2026_CALENDAR.is_court_closure(date(2027, 1, 1))
+    assert GEORGIA_2026_CALENDAR.closure_coverage_end == date(2027, 1, 1)
+
+
 def test_july_observance_is_friday_july_3() -> None:
     assert GEORGIA_2026_CALENDAR.is_legal_holiday(date(2026, 7, 3))
     assert not GEORGIA_2026_CALENDAR.is_legal_holiday(date(2026, 7, 4))
