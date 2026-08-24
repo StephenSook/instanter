@@ -34,6 +34,10 @@ venv/
 /AGENTS.md
 /.claude/
 /docs/private/
+/frontend doc
+/image.png
+/image-1.png
+/.playwright-mcp/
 
 # Apple push credentials (Live Activity / APNs signing keys)
 *.p8
