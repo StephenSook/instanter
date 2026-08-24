@@ -302,8 +302,8 @@ def _flag_intake_risks(case: CaseInput, rule: JurisdictionRule, flags: list[Flag
                         f"Tack-and-mail component date {component.isoformat()} "
                         "does not match the entered service date "
                         f"{case.service_date.isoformat()}. The entered service "
-                        "date is used for computation, and an attorney must "
-                        "confirm which date starts the clock.",
+                        "date is the starting point for computation, and an "
+                        "attorney must confirm which date starts the clock.",
                     )
                 )
     elif case.service_method is ServiceMethod.UNKNOWN:
@@ -352,7 +352,8 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
                 Flag(
                     FlagCode.JURISDICTION_UNSUPPORTED,
                     f"No rule row for jurisdiction {case.jurisdiction_id!r}; "
-                    "the engine does not guess out-of-state deadlines.",
+                    "the engine does not guess deadlines for unsupported "
+                    "jurisdictions.",
                 ),
             ),
             citation=rule.citation_string,
@@ -402,7 +403,36 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
     if rule.counting_basis is not CountingBasis.DAY_OF_SERVICE_EXCLUDED:
         raise NotImplementedError("only day-of-service-excluded counting is implemented")
     trace.append(TraceStep(case.service_date, "day of actual service; not counted (day 0)"))
-    candidate = case.service_date + timedelta(days=rule.window_length_days)
+    # A date near date.max is a valid date to the type system but its window
+    # arithmetic overflows; a malformed intake must refuse, never crash.
+    try:
+        candidate = case.service_date + timedelta(days=rule.window_length_days)
+    except OverflowError:
+        flags.append(
+            Flag(
+                FlagCode.CALENDAR_COVERAGE_GAP,
+                f"Service date {case.service_date.isoformat()} is not "
+                "arithmetically representable with the statutory window; "
+                "refusing to compute. An attorney must confirm the intake "
+                "record.",
+            )
+        )
+        return DeadlineResult(
+            case_id=case.case_id,
+            computed_deadline=None,
+            effective_deadline=case.summons_stated_deadline,
+            deadline_at=None,
+            tender_deadline=None,
+            court_reopens_on=None,
+            flags=tuple(flags),
+            deadline_basis=(
+                DeadlineBasis.SUMMONS_ONLY_UNVERIFIED
+                if case.summons_stated_deadline is not None
+                else DeadlineBasis.NONE
+            ),
+            trace=tuple(trace),
+            citation=rule.citation_string,
+        )
     trace.append(
         TraceStep(candidate, f"day {rule.window_length_days} (calendar days; intermediates count)")
     )
@@ -472,13 +502,17 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
     # O.C.G.A. 44-7-52 tender window, computed in parallel as advisory only.
     tender: date | None = None
     if rule.tender_window_days is not None:
-        tender_candidate = case.service_date + timedelta(days=rule.tender_window_days)
-        tender_flags: list[Flag] = []
-        tender_trace: list[TraceStep] = []
-        if rule.terminal_roll is TerminalRoll.NEXT_NON_WEEKEND_NON_HOLIDAY:
-            tender = _roll_terminal_day(rule, tender_candidate, tender_trace, tender_flags)
-        else:
-            tender = tender_candidate
+        try:
+            tender_candidate = case.service_date + timedelta(days=rule.tender_window_days)
+        except OverflowError:
+            tender_candidate = None  # advisory only; the main path already refused or flagged
+        if tender_candidate is not None:
+            tender_flags: list[Flag] = []
+            tender_trace: list[TraceStep] = []
+            if rule.terminal_roll is TerminalRoll.NEXT_NON_WEEKEND_NON_HOLIDAY:
+                tender = _roll_terminal_day(rule, tender_candidate, tender_trace, tender_flags)
+            else:
+                tender = tender_candidate
 
     return DeadlineResult(
         case_id=case.case_id,
