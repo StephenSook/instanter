@@ -507,6 +507,50 @@ def test_coverage_gap_split_reason_never_claims_a_finalized_computation() -> Non
     assert "starting point for computation" in reason
 
 
+def test_mismatch_reason_stays_outcome_neutral_on_coverage_gap() -> None:
+    # Round-10 finding: the mismatch branch kept the finalized-computation
+    # claim that round 9 removed from the split branch.
+    result = compute(
+        make_case(
+            date(2026, 12, 25),
+            ServiceMethod.TACK_AND_MAIL,
+            posting_date=date(2026, 12, 24),
+            mailing_date=date(2026, 12, 24),
+        )
+    )
+    assert result.computed_deadline is None
+    assert FlagCode.CALENDAR_COVERAGE_GAP in flag_codes(result)
+    reason = next(
+        f.reason for f in result.flags if f.code is FlagCode.TACK_AND_MAIL_SERVICE_MISMATCH
+    )
+    assert "is used for computation" not in reason
+    assert "starting point for computation" in reason
+
+
+def test_extreme_service_date_refuses_instead_of_crashing() -> None:
+    # Round-10 finding: date.max is a valid date whose window arithmetic
+    # overflows; the engine must refuse, never raise.
+    result = compute(make_case(date.max))
+    assert result.computed_deadline is None
+    assert result.tender_deadline is None
+    assert FlagCode.CALENDAR_COVERAGE_GAP in flag_codes(result)
+
+
+def test_unsupported_jurisdiction_reason_does_not_claim_out_of_state() -> None:
+    # Round-10 finding: GA-DEKALB is in-state but unsupported; the reason
+    # must not mislabel it as out-of-state.
+    case = CaseInput(
+        case_id="X",
+        jurisdiction_id="GA-DEKALB",
+        service_date=date(2026, 8, 10),
+        service_method=ServiceMethod.PERSONAL,
+    )
+    result = compute_deadline(case, GEORGIA_RULE)
+    reason = next(f.reason for f in result.flags if f.code is FlagCode.JURISDICTION_UNSUPPORTED)
+    assert "out-of-state" not in reason
+    assert "unsupported" in reason
+
+
 def test_rolling_holiday_warning_makes_no_summons_claim_without_a_summons() -> None:
     # Round-9 finding: the roll-time divergence warning used to assert that
     # a summons-stated date controls even when no summons exists.
