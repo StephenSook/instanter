@@ -83,13 +83,50 @@ CLOSURE_COVERAGE_END: date = date(2027, 1, 1)
 
 @dataclass(frozen=True)
 class HolidayCalendar:
-    """A jurisdiction's legal-holiday set and courthouse-closure set."""
+    """A jurisdiction's legal-holiday set and courthouse-closure set.
+
+    Construction validates every element, because calendar data IS the law
+    here and a single malformed entry produces a wrong deadline presented as
+    verified: a ``datetime`` in the set compares unequal to the ``date`` being
+    checked, so the holiday silently stops existing and the terminal roll
+    never fires.
+    """
 
     legal_holidays: frozenset[date]
     court_closures: frozenset[date]
     holiday_coverage_start: date
     holiday_coverage_end: date
     closure_coverage_end: date
+
+    def __post_init__(self) -> None:
+        for name, collection in (
+            ("legal_holidays", self.legal_holidays),
+            ("court_closures", self.court_closures),
+        ):
+            if not isinstance(collection, frozenset):
+                raise TypeError(f"{name} must be a frozenset of dates, got {type(collection)!r}")
+            for d in collection:
+                # type() is date, not isinstance: datetime subclasses date but
+                # never equals one, which would silently erase the holiday.
+                if type(d) is not date:
+                    raise TypeError(f"{name} entries must be datetime.date, got {d!r}")
+        for name, d in (
+            ("holiday_coverage_start", self.holiday_coverage_start),
+            ("holiday_coverage_end", self.holiday_coverage_end),
+            ("closure_coverage_end", self.closure_coverage_end),
+        ):
+            if type(d) is not date:
+                raise TypeError(f"{name} must be a datetime.date, got {d!r}")
+        if self.holiday_coverage_start > self.holiday_coverage_end:
+            raise ValueError("holiday coverage bounds are inverted")
+        if self.closure_coverage_end < self.holiday_coverage_start:
+            raise ValueError("closure_coverage_end precedes holiday_coverage_start")
+        for d in self.legal_holidays:
+            if not (self.holiday_coverage_start <= d <= self.holiday_coverage_end):
+                raise ValueError(f"legal holiday {d.isoformat()} lies outside holiday coverage")
+        for d in self.court_closures:
+            if not (self.holiday_coverage_start <= d <= self.closure_coverage_end):
+                raise ValueError(f"court closure {d.isoformat()} lies outside closure coverage")
 
     def is_legal_holiday(self, day: date) -> bool:
         return day in self.legal_holidays
