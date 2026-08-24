@@ -137,6 +137,14 @@ def _is_weekend(day: date) -> bool:
     return day.weekday() >= 5
 
 
+def _next_day(day: date) -> date | None:
+    """Checked date advancement: None instead of OverflowError at date.max."""
+    try:
+        return day + timedelta(days=1)
+    except OverflowError:
+        return None
+
+
 def _next_court_open_day(rule: JurisdictionRule, start: date) -> date | None:
     """First day after ``start`` that is a weekday and not a courthouse closure.
 
@@ -144,10 +152,10 @@ def _next_court_open_day(rule: JurisdictionRule, start: date) -> date | None:
     Returns None as soon as the closure table's coverage runs out: a date we
     have no closure data for must never be reported as an open day.
     """
-    day = start
+    day: date | None = start
     for _ in range(30):
-        day = day + timedelta(days=1)
-        if day > rule.calendar.closure_coverage_end:
+        day = _next_day(day) if day is not None else None
+        if day is None or day > rule.calendar.closure_coverage_end:
             return None
         if not _is_weekend(day) and not rule.calendar.is_court_closure(day):
             return day
@@ -183,10 +191,10 @@ def _flag_effective_date_anomalies(
             Flag(
                 FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY,
                 f"Last day to answer {effective.isoformat()} is a courthouse "
-                "closure that is NOT a Georgia legal holiday, so the "
-                "statute does not roll it forward, and absent a judicial "
-                "emergency order there is no automatic extension. An "
-                f"attorney must resolve this date.{reopen_text}",
+                f"closure that is NOT a {rule.jurisdiction_label} legal "
+                "holiday, so the statute does not roll it forward, and absent "
+                "a judicial emergency order there is no automatic extension. "
+                f"An attorney must resolve this date.{reopen_text}",
                 day=effective,
             )
         )
@@ -199,11 +207,12 @@ def _flag_effective_date_anomalies(
         flags.append(
             Flag(
                 FlagCode.STATE_HOLIDAY_COURT_OPEN,
-                f"Last day to answer {effective.isoformat()} is a Georgia "
-                "legal holiday on which the Fulton courthouse is open. The "
-                "statute treats it as a non-answer day and would roll past "
-                "it; the calendars diverge here and an attorney must resolve "
-                "which date controls.",
+                f"Last day to answer {effective.isoformat()} is a "
+                f"{rule.jurisdiction_label} legal holiday on which "
+                f"{rule.court_label} is open. The statute treats it as a "
+                "non-answer day and would roll past it; the calendars "
+                "diverge here and an attorney must resolve which date "
+                "controls.",
                 day=effective,
             )
         )
@@ -227,27 +236,41 @@ def _roll_terminal_day(
             )
             trace.append(TraceStep(day, "outside holiday-calendar coverage; computation stopped"))
             return None
+        advanced: date | None
         if _is_weekend(day):
             trace.append(TraceStep(day, f"{day.strftime('%A')}; roll forward"))
-            day = day + timedelta(days=1)
-            continue
-        if rule.calendar.is_legal_holiday(day):
+            advanced = _next_day(day)
+        elif rule.calendar.is_legal_holiday(day):
             if not rule.calendar.is_court_closure(day):
                 flags.append(
                     Flag(
                         FlagCode.STATE_HOLIDAY_COURT_OPEN,
-                        f"{day.isoformat()} is a Georgia legal holiday, but the "
-                        "Fulton courthouse is open that day. The statute rolls "
-                        "the deadline past it, while the Fulton summons keys "
-                        "its roll to 'Court holiday'; the calendars diverge "
-                        "here and an attorney must confirm the operative date.",
+                        f"{day.isoformat()} is a {rule.jurisdiction_label} legal "
+                        f"holiday, but {rule.court_label} is open that day. The "
+                        "statute rolls the deadline past it, while the summons "
+                        "keys its roll to a court-holiday calendar; the "
+                        "calendars diverge here and an attorney must confirm "
+                        "the operative date.",
                         day=day,
                     )
                 )
-            trace.append(TraceStep(day, "Georgia legal holiday; roll forward"))
-            day = day + timedelta(days=1)
-            continue
-        return day
+            trace.append(TraceStep(day, f"{rule.jurisdiction_label} legal holiday; roll forward"))
+            advanced = _next_day(day)
+        else:
+            return day
+        if advanced is None:
+            # Rolling walked off the end of representable dates; refuse.
+            flags.append(
+                Flag(
+                    FlagCode.CALENDAR_COVERAGE_GAP,
+                    f"Terminal-day roll past {day.isoformat()} is not "
+                    "arithmetically representable; refusing to finalize a "
+                    "deadline.",
+                )
+            )
+            trace.append(TraceStep(day, "date arithmetic limit reached; computation stopped"))
+            return None
+        day = advanced
     raise RuntimeError("terminal-day roll exceeded 15 days; calendar data is malformed")
 
 
@@ -351,9 +374,11 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
             flags=(
                 Flag(
                     FlagCode.JURISDICTION_UNSUPPORTED,
-                    f"No rule row for jurisdiction {case.jurisdiction_id!r}; "
-                    "the engine does not guess deadlines for unsupported "
-                    "jurisdictions.",
+                    f"Case jurisdiction {case.jurisdiction_id!r} does not "
+                    f"match the supplied rule ({rule.jurisdiction_id!r}); "
+                    "refusing to compute under a mismatched rule. Whether a "
+                    "rule row exists for this jurisdiction is decided by the "
+                    "dispatcher, not here.",
                 ),
             ),
             citation=rule.citation_string,
@@ -417,13 +442,20 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
                 "record.",
             )
         )
+        # The effective-date hazard checks still apply to a summons-only
+        # date on this refusal path, exactly as on the missing-service path.
+        overflow_reopens: date | None = None
+        if case.summons_stated_deadline is not None:
+            overflow_reopens = _flag_effective_date_anomalies(
+                rule, case.summons_stated_deadline, flags
+            )
         return DeadlineResult(
             case_id=case.case_id,
             computed_deadline=None,
             effective_deadline=case.summons_stated_deadline,
             deadline_at=None,
             tender_deadline=None,
-            court_reopens_on=None,
+            court_reopens_on=overflow_reopens,
             flags=tuple(flags),
             deadline_basis=(
                 DeadlineBasis.SUMMONS_ONLY_UNVERIFIED
