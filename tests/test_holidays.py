@@ -20,44 +20,50 @@ from engine.holidays import (
 def test_legal_holiday_exact_set_2026() -> None:
     # Exact-set pin (Grok cross-review): a count test alone cannot catch a
     # same-count date shift on an unpinned holiday. Every date is asserted.
-    assert GEORGIA_LEGAL_HOLIDAYS_2026 == frozenset(
-        {
-            date(2026, 1, 1),
-            date(2026, 1, 19),
-            date(2026, 2, 16),
-            date(2026, 4, 3),
-            date(2026, 5, 25),
-            date(2026, 6, 19),
-            date(2026, 7, 3),
-            date(2026, 9, 7),
-            date(2026, 10, 12),
-            date(2026, 11, 11),
-            date(2026, 11, 26),
-            date(2026, 11, 27),
-            date(2026, 12, 24),
-            date(2026, 12, 25),
-        }
+    assert (
+        frozenset(
+            {
+                date(2026, 1, 1),
+                date(2026, 1, 19),
+                date(2026, 2, 16),
+                date(2026, 4, 3),
+                date(2026, 5, 25),
+                date(2026, 6, 19),
+                date(2026, 7, 3),
+                date(2026, 9, 7),
+                date(2026, 10, 12),
+                date(2026, 11, 11),
+                date(2026, 11, 26),
+                date(2026, 11, 27),
+                date(2026, 12, 24),
+                date(2026, 12, 25),
+            }
+        )
+        == GEORGIA_LEGAL_HOLIDAYS_2026
     )
 
 
 def test_court_closure_exact_set_2026() -> None:
-    assert FULTON_COURT_CLOSURES_2026 == frozenset(
-        {
-            date(2026, 1, 1),
-            date(2026, 1, 19),
-            date(2026, 2, 16),
-            date(2026, 5, 25),
-            date(2026, 6, 19),
-            date(2026, 7, 3),
-            date(2026, 9, 7),
-            date(2026, 11, 11),
-            date(2026, 11, 26),
-            date(2026, 11, 27),
-            date(2026, 12, 24),
-            date(2026, 12, 25),
-            date(2026, 12, 31),
-            date(2027, 1, 1),
-        }
+    assert (
+        frozenset(
+            {
+                date(2026, 1, 1),
+                date(2026, 1, 19),
+                date(2026, 2, 16),
+                date(2026, 5, 25),
+                date(2026, 6, 19),
+                date(2026, 7, 3),
+                date(2026, 9, 7),
+                date(2026, 11, 11),
+                date(2026, 11, 26),
+                date(2026, 11, 27),
+                date(2026, 12, 24),
+                date(2026, 12, 25),
+                date(2026, 12, 31),
+                date(2027, 1, 1),
+            }
+        )
+        == FULTON_COURT_CLOSURES_2026
     )
 
 
