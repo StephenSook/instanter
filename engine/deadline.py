@@ -56,6 +56,10 @@ class DeadlineBasis(Enum):
 class Flag:
     code: FlagCode
     reason: str
+    # The specific calendar date a calendar-anomaly flag is about, so two
+    # anomalies of the same kind on different dates are never conflated
+    # (deduplication must be keyed on code AND date, not code alone).
+    day: date | None = None
 
 
 @dataclass(frozen=True)
@@ -166,7 +170,10 @@ def _flag_effective_date_anomalies(
     """
     if not rule.calendar.holiday_knowledge_covers(effective):
         return None
-    existing = {f.code for f in flags}
+    # Deduplicate by code AND date: rolling may already have flagged a
+    # different holiday (April 3) while the controlling summons date lands
+    # on another (October 12); both dates must stay visible.
+    already_flagged = {(f.code, f.day) for f in flags}
     if rule.calendar.is_court_closure(effective) and not rule.calendar.is_legal_holiday(effective):
         court_reopens = _next_court_open_day(rule, effective)
         reopen_text = (
@@ -180,13 +187,14 @@ def _flag_effective_date_anomalies(
                 "statute does not roll it forward, and absent a judicial "
                 "emergency order there is no automatic extension. An "
                 f"attorney must resolve this date.{reopen_text}",
+                day=effective,
             )
         )
         return court_reopens
     if (
         rule.calendar.is_legal_holiday(effective)
         and not rule.calendar.is_court_closure(effective)
-        and FlagCode.STATE_HOLIDAY_COURT_OPEN not in existing
+        and (FlagCode.STATE_HOLIDAY_COURT_OPEN, effective) not in already_flagged
     ):
         flags.append(
             Flag(
@@ -196,6 +204,7 @@ def _flag_effective_date_anomalies(
                 "statute treats it as a non-answer day and would roll past "
                 "it; the calendars diverge here and an attorney must resolve "
                 "which date controls.",
+                day=effective,
             )
         )
     return None
@@ -231,6 +240,7 @@ def _roll_terminal_day(
                         "Fulton courthouse is open that day. The statute rolls "
                         "the deadline; the summons keys to 'Court holiday'. "
                         "Summons-stated date controls for the tenant.",
+                        day=day,
                     )
                 )
             trace.append(TraceStep(day, "Georgia legal holiday; roll forward"))

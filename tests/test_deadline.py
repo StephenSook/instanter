@@ -479,6 +479,20 @@ def test_holiday_court_open_flag_is_not_duplicated() -> None:
     assert result.computed_deadline == date(2026, 4, 6)
     holiday_flags = [f for f in result.flags if f.code is FlagCode.STATE_HOLIDAY_COURT_OPEN]
     assert len(holiday_flags) == 1
+    assert holiday_flags[0].day == date(2026, 4, 3)
+
+
+def test_two_divergent_dates_keep_both_flags() -> None:
+    # Round-6 finding: computation crosses Good Friday (flagged for Apr 3),
+    # then the summons controls on Columbus Day (Oct 12, also a holiday the
+    # courthouse stays open on). Code-only deduplication suppressed the
+    # controlling date's hazard; date-aware deduplication must keep BOTH.
+    result = compute(make_case(date(2026, 3, 27), summons_stated_deadline=date(2026, 10, 12)))
+    assert result.computed_deadline == date(2026, 4, 6)
+    assert result.effective_deadline == date(2026, 10, 12)
+    holiday_flags = [f for f in result.flags if f.code is FlagCode.STATE_HOLIDAY_COURT_OPEN]
+    assert {f.day for f in holiday_flags} == {date(2026, 4, 3), date(2026, 10, 12)}
+    assert FlagCode.SUMMONS_DATE_CONFLICT in flag_codes(result)
 
 
 def test_summons_controls_timestamp_comes_from_summons_date() -> None:
