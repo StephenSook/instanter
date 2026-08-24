@@ -122,4 +122,10 @@ def build_triage_graph(ctx: RunContext) -> Graph:
     builder.add_edge("analyst", "writer")
     builder.add_edge("writer", "drafter", condition=attorney_approved_something)
     builder.set_entry_point("analyst")
+    # The graph is a 3-node DAG; these are hard backstops so a runaway
+    # execution can never bill unbounded (an unattended agent's failure
+    # mode is cost, not just wrong output).
+    builder.set_max_node_executions(6)
+    builder.set_execution_timeout(600.0)
+    builder.set_node_timeout(300.0)
     return builder.build()

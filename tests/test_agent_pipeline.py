@@ -108,21 +108,17 @@ def test_observation_submission_validates_and_rejects_advice(tmp_path: Path) -> 
     tools = build_tools(ctx)
     good = tools["submit_case_observations"](
         case_id="26ED00901",
-        observations={
-            "summary": "Notes report papers taped to the door.",
-            "mentions_service_by_posting": True,
-            "needs_human_confirmation": True,
-            "confidence": 0.8,
-        },
+        summary="Notes report papers taped to the door.",
+        mentions_service_by_posting=True,
+        needs_human_confirmation=True,
+        confidence=0.8,
     )
     assert "recorded" in good
     bad = tools["submit_case_observations"](
         case_id="26ED00901",
-        observations={
-            "summary": "You should file an answer immediately.",
-            "needs_human_confirmation": False,
-            "confidence": 0.9,
-        },
+        summary="You should file an answer immediately.",
+        needs_human_confirmation=False,
+        confidence=0.9,
     )
     assert "VALIDATION FAILED" in bad
     assert "advice language" in bad
@@ -144,23 +140,19 @@ def test_rationale_requires_interrupt_case_and_exact_echo(tmp_path: Path) -> Non
 
     refused = tools["submit_escalation_rationale"](
         case_id=monitor_case,
-        rationale={
-            "disposition": "monitor",
-            "contributing_factors": ["far from deadline"],
-            "rationale": "Not urgent this run.",
-            "confidence": 0.9,
-        },
+        disposition="monitor",
+        contributing_factors=["far from deadline"],
+        rationale="Not urgent this run.",
+        confidence=0.9,
     )
     assert "NOT AN INTERRUPT CASE" in refused
 
     mismatched = tools["submit_escalation_rationale"](
         case_id=interrupt_id,
-        rationale={
-            "disposition": "monitor",
-            "contributing_factors": ["overdue deadline"],
-            "rationale": "Deadline already passed; default writ exposure is live.",
-            "confidence": 0.9,
-        },
+        disposition="monitor",
+        contributing_factors=["overdue deadline"],
+        rationale="Deadline already passed; default writ exposure is live.",
+        confidence=0.9,
     )
     assert "DISPOSITION MISMATCH" in mismatched
 
@@ -180,23 +172,24 @@ def test_packet_memo_only_for_committed_and_no_advice(tmp_path: Path) -> None:
     interrupt_id = ctx.interrupt_candidates[0].case_id
     tools["submit_escalation_rationale"](
         case_id=interrupt_id,
-        rationale={
-            "disposition": "interrupt",
-            "contributing_factors": ["deadline overdue"],
-            "rationale": "Deadline passed with no answer on file; writ exposure is live.",
-            "confidence": 0.9,
-        },
+        disposition="interrupt",
+        contributing_factors=["deadline overdue"],
+        rationale="Deadline passed with no answer on file; writ exposure is live.",
+        confidence=0.9,
     )
     assert "NOT COMMITTED" in tools["write_packet_memo"](case_id=interrupt_id, memo="memo")
     tools["commit_escalations"]()
     ctx.attorney_action = "approved"
-    assert "recorded" in tools["write_packet_memo"](
-        case_id=interrupt_id, memo="Deadline was 2026-09-08; rank 1 of 1; confirm intake facts."
-    )
     poisoned = tools["write_packet_memo"](
         case_id=interrupt_id, memo="The tenant should raise the defense of tender."
     )
     assert "VALIDATION FAILED" in poisoned
+    assert interrupt_id not in ctx.packet_memos
+    assert "recorded" in tools["write_packet_memo"](
+        case_id=interrupt_id, memo="Deadline was 2026-09-08; rank 1 of 1; confirm intake facts."
+    )
+    duplicate = tools["write_packet_memo"](case_id=interrupt_id, memo="A second memo.")
+    assert "ALREADY RECORDED" in duplicate
 
 
 # --- Model-free end-to-end over the real seed --------------------------------
