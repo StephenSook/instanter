@@ -57,9 +57,27 @@ class JurisdictionRule:
             raise TypeError(f"counting_basis must be a CountingBasis, got {self.counting_basis!r}")
         if not isinstance(self.terminal_roll, TerminalRoll):
             raise TypeError(f"terminal_roll must be a TerminalRoll, got {self.terminal_roll!r}")
-        if not isinstance(self.window_length_days, int) or self.window_length_days < 1:
+        # type() checks, not isinstance(): bool is a subclass of int, and a
+        # row with window_length_days=True would otherwise compute a one-day
+        # window without a whisper of protest.
+        if type(self.window_length_days) is not int or self.window_length_days < 1:
             raise ValueError(
                 f"window_length_days must be a positive int, got {self.window_length_days!r}"
+            )
+        if self.intermediate_days_counted is not True:
+            # The engine implements calendar-day counting only. A row claiming
+            # business-day intermediates would be silently computed as calendar
+            # days, which is a wrong deadline wearing a valid config.
+            raise NotImplementedError(
+                "intermediate_days_counted=False is not implemented; "
+                "refusing a rule row the engine would misinterpret"
+            )
+        if self.tender_window_days is not None and (
+            type(self.tender_window_days) is not int or self.tender_window_days < 1
+        ):
+            raise ValueError(
+                f"tender_window_days must be None or a positive int, "
+                f"got {self.tender_window_days!r}"
             )
 
 
