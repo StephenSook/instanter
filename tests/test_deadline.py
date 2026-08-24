@@ -8,7 +8,7 @@ trap, tack-and-mail flags, the summons-conflict rule, refusal paths, the
 calendar coverage guard, and jurisdiction-table extensibility.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
@@ -548,7 +548,116 @@ def test_unsupported_jurisdiction_reason_does_not_claim_out_of_state() -> None:
     result = compute_deadline(case, GEORGIA_RULE)
     reason = next(f.reason for f in result.flags if f.code is FlagCode.JURISDICTION_UNSUPPORTED)
     assert "out-of-state" not in reason
-    assert "unsupported" in reason
+    assert "does not match the supplied rule" in reason
+
+
+def _make_rule(**overrides: object) -> JurisdictionRule:
+    base: dict[str, object] = {
+        "jurisdiction_id": "XX-TEST",
+        "citation_string": "Test Stat. 1-2-3",
+        "window_length_days": 7,
+        "counting_basis": CountingBasis.DAY_OF_SERVICE_EXCLUDED,
+        "intermediate_days_counted": True,
+        "terminal_roll": TerminalRoll.NEXT_NON_WEEKEND_NON_HOLIDAY,
+        "calendar": GEORGIA_RULE.calendar,
+        "tack_and_mail_money_judgment_note": "n/a",
+        "tender_window_days": None,
+        "deadline_time_of_day": "17:00",
+        "deadline_timezone": "America/New_York",
+        "notes": "",
+    }
+    base.update(overrides)
+    return JurisdictionRule(**base)  # type: ignore[arg-type]
+
+
+def test_overflow_refusal_still_checks_summons_hazards() -> None:
+    # Round-11 finding: the overflow refusal returned before the shared
+    # effective-date anomaly projection.
+    result = compute(make_case(date.max, summons_stated_deadline=date(2026, 12, 31)))
+    assert result.computed_deadline is None
+    assert FlagCode.CALENDAR_COVERAGE_GAP in flag_codes(result)
+    assert FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY in flag_codes(result)
+    assert result.deadline_basis is DeadlineBasis.SUMMONS_ONLY_UNVERIFIED
+    assert result.deadline_at is None
+
+
+def test_terminal_roll_at_date_max_refuses_instead_of_crashing() -> None:
+    # Round-11 finding: rolling advanced past date.max and raised.
+    from engine.holidays import HolidayCalendar
+
+    calendar = HolidayCalendar(
+        legal_holidays=frozenset({date.max}),
+        court_closures=frozenset({date.max}),
+        holiday_coverage_start=date.max - timedelta(days=30),
+        holiday_coverage_end=date.max,
+        closure_coverage_end=date.max,
+    )
+    rule = _make_rule(jurisdiction_id="XX-EDGE", calendar=calendar)
+    case = CaseInput(
+        case_id="X",
+        jurisdiction_id="XX-EDGE",
+        service_date=date.max - timedelta(days=7),
+        service_method=ServiceMethod.PERSONAL,
+    )
+    result = compute_deadline(case, rule)
+    assert result.computed_deadline is None
+    assert FlagCode.CALENDAR_COVERAGE_GAP in flag_codes(result)
+
+
+def test_reopening_advisory_at_date_max_returns_none_not_crash() -> None:
+    # Round-11 finding: the reopening advisory incremented past date.max.
+    from engine.holidays import HolidayCalendar
+
+    calendar = HolidayCalendar(
+        legal_holidays=frozenset(),
+        court_closures=frozenset({date.max}),
+        holiday_coverage_start=date.max - timedelta(days=30),
+        holiday_coverage_end=date.max,
+        closure_coverage_end=date.max,
+    )
+    rule = _make_rule(jurisdiction_id="XX-EDGE2", calendar=calendar)
+    case = CaseInput(
+        case_id="X",
+        jurisdiction_id="XX-EDGE2",
+        service_date=date.max - timedelta(days=7),
+        service_method=ServiceMethod.PERSONAL,
+    )
+    result = compute_deadline(case, rule)  # date.max is a Friday; no weekend roll
+    assert result.computed_deadline == date.max
+    assert FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY in flag_codes(result)
+    assert result.court_reopens_on is None
+
+
+def test_mismatched_rule_reason_names_both_identifiers() -> None:
+    # Round-11 finding: a registered jurisdiction passed with the wrong rule
+    # was mislabeled as having no rule row at all.
+    case = CaseInput(
+        case_id="X",
+        jurisdiction_id="GA-FULTON",
+        service_date=date(2026, 8, 10),
+        service_method=ServiceMethod.PERSONAL,
+    )
+    result = compute_deadline(case, _make_rule())
+    reason = next(f.reason for f in result.flags if f.code is FlagCode.JURISDICTION_UNSUPPORTED)
+    assert "GA-FULTON" in reason
+    assert "XX-TEST" in reason
+    assert "No rule row" not in reason
+
+
+def test_non_georgia_rule_emits_no_georgia_or_fulton_claims() -> None:
+    # Round-11 finding: divergence warnings hardcoded Georgia and Fulton.
+    rule = _make_rule(jurisdiction_id="TX-HARRIS")
+    case = CaseInput(
+        case_id="X",
+        jurisdiction_id="TX-HARRIS",
+        service_date=date(2026, 3, 27),  # day 7 = Apr 3, holiday-court-open in this calendar
+        service_method=ServiceMethod.PERSONAL,
+    )
+    result = compute_deadline(case, rule)
+    reason = next(f.reason for f in result.flags if f.code is FlagCode.STATE_HOLIDAY_COURT_OPEN)
+    assert "Georgia" not in reason
+    assert "Fulton" not in reason
+    assert "this jurisdiction" in reason
 
 
 def test_rolling_holiday_warning_makes_no_summons_claim_without_a_summons() -> None:

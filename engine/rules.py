@@ -48,6 +48,10 @@ class JurisdictionRule:
     deadline_time_of_day: str  # local clerk close, display-level
     deadline_timezone: str
     notes: str
+    # Prose labels used in attorney-facing warnings, so a non-Georgia rule
+    # row never emits Georgia- or Fulton-specific legal claims.
+    jurisdiction_label: str = "this jurisdiction"
+    court_label: str = "the courthouse"
 
     def __post_init__(self) -> None:
         # A rule row is legal configuration; a malformed row must fail closed
@@ -105,6 +109,12 @@ class JurisdictionRule:
         # Instantiating the zone at construction surfaces an unknown timezone
         # immediately rather than at the first computed deadline.
         ZoneInfo(self.deadline_timezone)
+        for label_name, label in (
+            ("jurisdiction_label", self.jurisdiction_label),
+            ("court_label", self.court_label),
+        ):
+            if type(label) is not str or not label.strip():
+                raise ValueError(f"{label_name} must be a non-empty string, got {label!r}")
 
 
 GEORGIA_RULE = JurisdictionRule(
@@ -129,6 +139,8 @@ GEORGIA_RULE = JurisdictionRule(
         "The Fulton summons rolls off a 'Court holiday' while the statute says "
         "'legal holiday'; the engine surfaces any date where those calendars diverge."
     ),
+    jurisdiction_label="Georgia",
+    court_label="the Fulton courthouse",
 )
 
 RULES: dict[str, JurisdictionRule] = {GEORGIA_RULE.jurisdiction_id: GEORGIA_RULE}
