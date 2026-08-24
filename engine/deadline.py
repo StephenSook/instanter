@@ -250,6 +250,71 @@ def _roll_terminal_day(
     raise RuntimeError("terminal-day roll exceeded 15 days; calendar data is malformed")
 
 
+def _flag_intake_risks(case: CaseInput, rule: JurisdictionRule, flags: list[Flag]) -> None:
+    """Service-method and affidavit risk flags (discriminators, not dates).
+
+    Runs on EVERY supported path, including the missing-service refusal: a
+    tack-and-mail case with no service date still carries the default and
+    money-judgment exposure the attorney must see. Only the service-date
+    mismatch check requires a known service date.
+    """
+    if case.service_method is ServiceMethod.TACK_AND_MAIL:
+        flags.append(Flag(FlagCode.TACK_AND_MAIL_REVIEW, rule.tack_and_mail_money_judgment_note))
+        if (
+            case.posting_date is not None
+            and case.mailing_date is not None
+            and case.posting_date != case.mailing_date
+        ):
+            flags.append(
+                Flag(
+                    FlagCode.TACK_AND_MAIL_DATE_SPLIT,
+                    f"Posting date {case.posting_date.isoformat()} and mailing "
+                    f"date {case.mailing_date.isoformat()} differ; the entered "
+                    "service date is used for computation, and an attorney "
+                    "must confirm which date starts the clock.",
+                )
+            )
+        else:
+            # Component dates that agree with each other (or a single known
+            # component) can still contradict the entered service date; a
+            # mapping or intake error would otherwise move the deadline with
+            # no warning at all.
+            component = case.posting_date if case.posting_date is not None else case.mailing_date
+            if (
+                component is not None
+                and case.service_date is not None
+                and component != case.service_date
+            ):
+                flags.append(
+                    Flag(
+                        FlagCode.TACK_AND_MAIL_SERVICE_MISMATCH,
+                        f"Tack-and-mail component date {component.isoformat()} "
+                        "does not match the entered service date "
+                        f"{case.service_date.isoformat()}. The entered service "
+                        "date is used for computation, and an attorney must "
+                        "confirm which date starts the clock.",
+                    )
+                )
+    elif case.service_method is ServiceMethod.UNKNOWN:
+        flags.append(
+            Flag(
+                FlagCode.UNKNOWN_SERVICE_METHOD,
+                "Service method not captured at intake; method-specific risk "
+                "(tack-and-mail default exposure) cannot be assessed.",
+            )
+        )
+
+    if case.amended_affidavit:
+        flags.append(
+            Flag(
+                FlagCode.AMENDED_AFFIDAVIT,
+                "Second or amended dispossessory affidavit on file; the "
+                "operative service event may have reset. Attorney must "
+                "confirm which service date controls.",
+            )
+        )
+
+
 def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
     """Compute the statutory last day to answer for one case.
 
@@ -291,6 +356,10 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
                 "answer, that date controls for the tenant.",
             )
         ]
+        # Method and affidavit risks are independent of the refusal: a
+        # tack-and-mail case with no service date still carries its
+        # default-exposure warning.
+        _flag_intake_risks(case, rule, missing_flags)
         # The effective-date hazard checks still apply to a summons-only
         # date: a summons stating a closed-clerk day must raise that
         # specific danger even when the computation is refused.
@@ -315,58 +384,8 @@ def compute_deadline(case: CaseInput, rule: JurisdictionRule) -> DeadlineResult:
             citation=rule.citation_string,
         )
 
-    # Service-method flags (risk discriminators, not date terms).
-    if case.service_method is ServiceMethod.TACK_AND_MAIL:
-        flags.append(Flag(FlagCode.TACK_AND_MAIL_REVIEW, rule.tack_and_mail_money_judgment_note))
-        if (
-            case.posting_date is not None
-            and case.mailing_date is not None
-            and case.posting_date != case.mailing_date
-        ):
-            flags.append(
-                Flag(
-                    FlagCode.TACK_AND_MAIL_DATE_SPLIT,
-                    f"Posting date {case.posting_date.isoformat()} and mailing "
-                    f"date {case.mailing_date.isoformat()} differ; the entered "
-                    "service date is used for computation, and an attorney "
-                    "must confirm which date starts the clock.",
-                )
-            )
-        else:
-            # Component dates that agree with each other (or a single known
-            # component) can still contradict the entered service date; a
-            # mapping or intake error would otherwise move the deadline with
-            # no warning at all.
-            component = case.posting_date if case.posting_date is not None else case.mailing_date
-            if component is not None and component != case.service_date:
-                flags.append(
-                    Flag(
-                        FlagCode.TACK_AND_MAIL_SERVICE_MISMATCH,
-                        f"Tack-and-mail component date {component.isoformat()} "
-                        "does not match the entered service date "
-                        f"{case.service_date.isoformat()}. The entered service "
-                        "date is used for computation, and an attorney must "
-                        "confirm which date starts the clock.",
-                    )
-                )
-    elif case.service_method is ServiceMethod.UNKNOWN:
-        flags.append(
-            Flag(
-                FlagCode.UNKNOWN_SERVICE_METHOD,
-                "Service method not captured at intake; method-specific risk "
-                "(tack-and-mail default exposure) cannot be assessed.",
-            )
-        )
-
-    if case.amended_affidavit:
-        flags.append(
-            Flag(
-                FlagCode.AMENDED_AFFIDAVIT,
-                "Second or amended dispossessory affidavit on file; the "
-                "operative service event may have reset. Attorney must "
-                "confirm which service date controls.",
-            )
-        )
+    # Service-method and affidavit risk flags (shared with the refusal path).
+    _flag_intake_risks(case, rule, flags)
 
     # Day count.
     if rule.counting_basis is not CountingBasis.DAY_OF_SERVICE_EXCLUDED:

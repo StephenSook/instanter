@@ -451,6 +451,43 @@ def test_tack_and_mail_components_matching_service_do_not_mismatch() -> None:
     assert FlagCode.TACK_AND_MAIL_REVIEW in flag_codes(result)
 
 
+def test_missing_service_still_carries_method_and_affidavit_risks() -> None:
+    # Round-7 finding: the refusal path must not hide independent risks.
+    tack = compute(
+        make_case(
+            None,
+            ServiceMethod.TACK_AND_MAIL,
+            posting_date=date(2026, 8, 10),
+            mailing_date=date(2026, 8, 11),
+        )
+    )
+    assert FlagCode.SERVICE_DATE_MISSING in flag_codes(tack)
+    assert FlagCode.TACK_AND_MAIL_REVIEW in flag_codes(tack)
+    assert FlagCode.TACK_AND_MAIL_DATE_SPLIT in flag_codes(tack)
+    # Mismatch check needs a service date, so it must NOT fire here.
+    assert FlagCode.TACK_AND_MAIL_SERVICE_MISMATCH not in flag_codes(tack)
+
+    unknown = compute(make_case(None, ServiceMethod.UNKNOWN))
+    assert FlagCode.UNKNOWN_SERVICE_METHOD in flag_codes(unknown)
+
+    amended = compute(make_case(None, amended_affidavit=True))
+    assert FlagCode.AMENDED_AFFIDAVIT in flag_codes(amended)
+
+
+def test_missing_service_tack_and_mail_with_closed_clerk_summons_stacks_all() -> None:
+    result = compute(
+        make_case(
+            None,
+            ServiceMethod.TACK_AND_MAIL,
+            summons_stated_deadline=date(2026, 12, 31),
+        )
+    )
+    assert FlagCode.SERVICE_DATE_MISSING in flag_codes(result)
+    assert FlagCode.TACK_AND_MAIL_REVIEW in flag_codes(result)
+    assert FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY in flag_codes(result)
+    assert result.deadline_basis is DeadlineBasis.SUMMONS_ONLY_UNVERIFIED
+
+
 def test_missing_service_with_closed_clerk_summons_raises_closure_flag() -> None:
     # Round-5 finding: the refusal path must still run the effective-date
     # hazard checks. A summons stating December 31 is the known dangerous
