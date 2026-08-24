@@ -412,6 +412,75 @@ def test_summons_stating_a_closed_clerk_day_raises_the_closure_flag() -> None:
     assert result.court_reopens_on is None  # 2027 closure data ends at Jan 1
 
 
+def test_tack_and_mail_component_agreeing_but_mismatching_service_flags() -> None:
+    # Posting and mailing agree with each other but not with the entered
+    # service date: a mapping error that must not pass silently (round 5).
+    result = compute(
+        make_case(
+            date(2026, 8, 12),
+            ServiceMethod.TACK_AND_MAIL,
+            posting_date=date(2026, 8, 10),
+            mailing_date=date(2026, 8, 10),
+        )
+    )
+    assert FlagCode.TACK_AND_MAIL_SERVICE_MISMATCH in flag_codes(result)
+    assert FlagCode.TACK_AND_MAIL_DATE_SPLIT not in flag_codes(result)
+
+
+def test_tack_and_mail_sole_component_mismatching_service_flags() -> None:
+    result = compute(
+        make_case(
+            date(2026, 8, 12),
+            ServiceMethod.TACK_AND_MAIL,
+            posting_date=date(2026, 8, 10),
+        )
+    )
+    assert FlagCode.TACK_AND_MAIL_SERVICE_MISMATCH in flag_codes(result)
+
+
+def test_tack_and_mail_components_matching_service_do_not_mismatch() -> None:
+    result = compute(
+        make_case(
+            date(2026, 8, 10),
+            ServiceMethod.TACK_AND_MAIL,
+            posting_date=date(2026, 8, 10),
+            mailing_date=date(2026, 8, 10),
+        )
+    )
+    assert FlagCode.TACK_AND_MAIL_SERVICE_MISMATCH not in flag_codes(result)
+    assert FlagCode.TACK_AND_MAIL_REVIEW in flag_codes(result)
+
+
+def test_missing_service_with_closed_clerk_summons_raises_closure_flag() -> None:
+    # Round-5 finding: the refusal path must still run the effective-date
+    # hazard checks. A summons stating December 31 is the known dangerous
+    # closure even when no computation is possible.
+    result = compute(make_case(None, summons_stated_deadline=date(2026, 12, 31)))
+    assert FlagCode.SERVICE_DATE_MISSING in flag_codes(result)
+    assert FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY in flag_codes(result)
+    assert result.deadline_basis is DeadlineBasis.SUMMONS_ONLY_UNVERIFIED
+    assert result.deadline_at is None
+
+
+def test_summons_stating_open_courthouse_holiday_raises_divergence_flag() -> None:
+    # Service Thu Mar 26: computed day 7 is Thu Apr 2. The summons says
+    # Apr 3, Good Friday: a legal holiday on which the courthouse is open.
+    # The inverse divergence must surface, not just the generic conflict.
+    result = compute(make_case(date(2026, 3, 26), summons_stated_deadline=date(2026, 4, 3)))
+    assert result.computed_deadline == date(2026, 4, 2)
+    assert FlagCode.SUMMONS_DATE_CONFLICT in flag_codes(result)
+    assert FlagCode.STATE_HOLIDAY_COURT_OPEN in flag_codes(result)
+
+
+def test_holiday_court_open_flag_is_not_duplicated() -> None:
+    # Rolling over Good Friday already emits STATE_HOLIDAY_COURT_OPEN; a
+    # summons stating that same day must not add a second copy.
+    result = compute(make_case(date(2026, 3, 27), summons_stated_deadline=date(2026, 4, 3)))
+    assert result.computed_deadline == date(2026, 4, 6)
+    holiday_flags = [f for f in result.flags if f.code is FlagCode.STATE_HOLIDAY_COURT_OPEN]
+    assert len(holiday_flags) == 1
+
+
 def test_summons_controls_timestamp_comes_from_summons_date() -> None:
     # Computed Aug 17, summons says Aug 18: summons controls, and the precise
     # timestamp follows the controlling date (verified computation exists).
