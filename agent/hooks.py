@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent, HookProvider, HookRegistry
@@ -105,7 +106,25 @@ def parse_attorney_response(response: object) -> tuple[str, str]:
     normalized = detail.lower().rstrip(".!")
     if normalized in ("approve", "approved", "approve all"):
         return "approved", "exact approval"
-    if normalized.startswith("defer"):
+    # Deferral is as strict as approval: an exact defer word, or a defer
+    # word followed by a reason. A bare prefix match flattened
+    # NON-deferrals into clean green deferrals ("Deferring to your
+    # judgment, approve all", "deference to...", "deferred maintenance
+    # noted; approve"), which resolved urgent cases with nobody's
+    # decision. And a response carrying BOTH defer and approve language
+    # is a conditional no parser may adjudicate: invalid, exchange
+    # unresolved, pending floor, red.
+    is_deferral_shaped = normalized in ("defer", "deferred") or normalized.startswith(
+        ("defer:", "defer ", "deferred:", "deferred ")
+    )
+    if is_deferral_shaped:
+        response_words = set(re.findall(r"[a-z]+", normalized))
+        if response_words & {"approve", "approved", "approval", "approving"}:
+            return (
+                "invalid",
+                "response mixes deferral and approval language; not treated "
+                "as a decision (fail closed)",
+            )
         return "deferred", "explicit deferral"
     # A near-miss ("aprove", "yes", a conditional approval) is NOT a
     # decision either way: flattening it into blanket approval is a
