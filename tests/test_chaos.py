@@ -606,8 +606,18 @@ def test_post_approval_failure_recovers_through_the_floor(
     def exploding_after_approval(ctx: RunContext, plugins: object = None) -> object:
         class G:
             def __call__(self, _prompt: object) -> object:
-                ctx.attorney_action = "approved"  # the hook fired...
-                raise RuntimeError("executor died before the commit")  # ...then death
+                # The realistic death sequence: the writer ranked the queue,
+                # wrote rationales, the hook recorded a SNAPSHOT-BOUND
+                # approval... and then the executor died before the commit.
+                from agent.runner import _template_rationale
+
+                tools = build_tools(ctx)
+                tools["get_ranked_queue"]()
+                for d in ctx.interrupt_candidates:
+                    ctx.rationales[d.case_id] = _template_rationale(d)
+                ctx.attorney_action = "approved"
+                ctx.approved_case_ids = tuple(d.case_id for d in ctx.interrupt_candidates)
+                raise RuntimeError("executor died before the commit")
 
         return G()
 
@@ -654,6 +664,60 @@ def test_concurrent_same_run_writers_never_duplicate_an_escalation(tmp_path: Pat
     for t in threads:
         t.join()
     assert len(store.list_escalations(run_id="r1")) == 1
+
+
+def test_unbound_approval_is_a_run_failure_and_recovery_stays_inside_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An approval bound to no candidate snapshot must never let recovery
+    commit a freshly ranked queue the attorney never saw; it fails the run."""
+    import agent.graph as graph_module
+    from agent.runner import run_live
+
+    def approves_nothing(ctx: RunContext, plugins: object = None) -> object:
+        class G:
+            def __call__(self, _prompt: object) -> object:
+                ctx.attorney_action = "approved"  # approval with NO snapshot
+                raise RuntimeError("died with an unbound approval")
+
+        return G()
+
+    monkeypatch.setattr(graph_module, "build_triage_graph", approves_nothing)
+    ctx = seed_ctx(tmp_path)
+    report = run_live(ctx, attorney_response="approve")
+    assert report.committed == ()  # nothing rides an unbound approval
+    assert "approval-not-bound-to-candidates" in report.failures
+    assert not report.succeeded
+
+
+def test_commit_never_exceeds_the_approval_snapshot(tmp_path: Path) -> None:
+    """Cases minted after the approval need a fresh interrupt; they can
+    never ride an existing approval into the store."""
+    ctx = make_ctx(
+        tmp_path,
+        [good_record("A-1", service_date="2026-08-30"), good_record("B-2", "2026-08-31")],
+        capacity=2,
+    )
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    for decision in ctx.interrupt_candidates:
+        tools["submit_escalation_rationale"](
+            case_id=decision.case_id,
+            disposition=decision.level.value,
+            contributing_factors=list(decision.factors)[:8],
+            rationale="Deadline has passed with no answer on file.",
+            confidence=0.9,
+        )
+    # The attorney approved ONLY A-1 (snapshot from an earlier queue state).
+    ctx.attorney_action = "approved"
+    ctx.approved_case_ids = ("A-1",)
+    result = tools["commit_escalations"]()
+    assert "Committed 1 escalation(s): A-1" in result
+    stored = ctx.store.list_escalations(run_id=ctx.run_id)
+    assert [e.case_id for e in stored] == ["A-1"]  # B-2 never rode the approval
+    events = ctx.audit.read_all()  # type: ignore[attr-defined]
+    refusals = [e for e in events if e["kind"] == "commit_refused"]
+    assert any(e["payload"]["reason"] == "requires_new_approval" for e in refusals)
 
 
 def test_overlapping_audit_sinks_never_share_a_sequence(tmp_path: Path) -> None:

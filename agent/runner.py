@@ -85,11 +85,19 @@ def _apply_attorney_decision(ctx: RunContext, tools: dict[str, Any], response: s
 
     action, reason = parse_attorney_response(response)
     ctx.attorney_action = action
+    if action == "approved" and ctx.approved_case_ids is None:
+        # Bind the approval to the presented candidates, same as the hook.
+        ctx.approved_case_ids = tuple(d.case_id for d in ctx.interrupt_candidates)
     ctx.audit.append(
         AuditEvent(
             kind="attorney_decision",
             case_id=None,
-            payload={"action": action, "detail": response.strip()[:400], "reason": reason},
+            payload={
+                "action": action,
+                "detail": response.strip()[:400],
+                "reason": reason,
+                "approved_cases": list(ctx.approved_case_ids or ()),
+            },
             run_id=ctx.run_id,
         )
     )
@@ -220,8 +228,12 @@ def run_live(
         tools = build_tools(ctx)
         if not ctx.decisions:
             tools["get_ranked_queue"]()
+        # Recovery is bounded by the approval snapshot: only what the
+        # attorney actually approved may be delivered under this approval.
         missing = [
-            d.case_id for d in ctx.interrupt_candidates if d.case_id not in ctx.committed_case_ids
+            case_id
+            for case_id in (ctx.approved_case_ids or ())
+            if case_id not in ctx.committed_case_ids
         ]
         if missing:
             backstop_used = True
@@ -289,12 +301,20 @@ def _report(
     ctx: RunContext, mode: str, backstop_used: bool = False, model_error: str = ""
 ) -> RunReport:
     # Parity check: an approved decision whose commit did not durably land
-    # for every interrupt-now case is a FAILED run, whatever else happened.
+    # for every APPROVED case is a FAILED run, whatever else happened. The
+    # approval snapshot is the reference (never the current queue, which
+    # recovery may have recomputed); an approval bound to no snapshot is
+    # itself a failure.
     failures: tuple[str, ...] = ()
     if ctx.attorney_action == "approved":
-        failures = tuple(
-            d.case_id for d in ctx.interrupt_candidates if d.case_id not in ctx.committed_case_ids
-        )
+        if ctx.approved_case_ids is None:
+            failures = ("approval-not-bound-to-candidates",)
+        else:
+            failures = tuple(
+                case_id
+                for case_id in ctx.approved_case_ids
+                if case_id not in ctx.committed_case_ids
+            )
     return RunReport(
         run_id=ctx.run_id,
         mode=mode,
