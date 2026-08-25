@@ -398,12 +398,16 @@ def run_live(
                 )
             )
             _pending_commit(ctx, tools)
-    elif ctx.attorney_action == "approved":
+    elif ctx.approved_case_ids is not None:
         # Approval is a decision, not a completed commit: an exception after
         # the hook approved but before the writes finished leaves approved
         # cases undelivered. Recover through the commit tool, which
         # reconciles against DURABLE store state first, so recovery can
-        # never duplicate a row that actually landed.
+        # never duplicate a row that actually landed. Keyed on the BOUND
+        # APPROVAL (the immutable obligation the report's parity also uses),
+        # not on the mutable action scalar: a later write to that scalar
+        # must never strand the recovery this branch exists to perform.
+        ctx.attorney_action = "approved"
         tools = build_tools(ctx)
         if not ctx.decisions:
             tools["get_ranked_queue"]()
@@ -448,7 +452,9 @@ def run_live(
 
     # Attorney-packet completeness: every committed case carries a memo,
     # whichever path committed it (drafter, floor, or recovery).
-    if ctx.attorney_action in ("approved", "pending") and ctx.committed_case_ids:
+    if (
+        ctx.attorney_action in ("approved", "pending") or ctx.approved_case_ids is not None
+    ) and ctx.committed_case_ids:
         if tools is None:
             tools = build_tools(ctx)
         _ensure_packet_memos(ctx, tools)

@@ -264,6 +264,33 @@ class AttorneyApprovalHook(HookProvider):
             "reason": reason,
             **response_audit_fields(response),
         }
+        # A RECORDED HUMAN DECISION IS IMMUTABLE FOR THE RUN. The attorney
+        # response is single-use, so any later interrupt is answered by the
+        # runner's own synthetic text, and letting that text overwrite the
+        # decision scalar stranded the approved-recovery path exactly when
+        # it was needed: a writer retrying a partially failed commit flipped
+        # "approved" to "deferred", so the recovery branch keyed on that
+        # scalar never ran and an approved case sat undelivered behind a red
+        # run the runner could have healed. The retry is refused and
+        # audited; the human's decision stands.
+        if self._ctx.approved_case_ids is not None:
+            self._ctx.audit.append(
+                AuditEvent(
+                    kind="commit_refused",
+                    case_id=None,
+                    payload={
+                        "reason": "approval_already_recorded",
+                        "retry_response": payload,
+                    },
+                    run_id=self._ctx.run_id,
+                )
+            )
+            event.cancel_tool = (
+                "APPROVAL ALREADY RECORDED: this run's attorney decision was "
+                "made and cannot be re-answered. Do NOT retry "
+                "commit_escalations; stop and reply COMMITTED."
+            )
+            return
         if action == "invalid":
             # An empty or non-string value is not a human decision: no
             # deferral is recorded (a transport bug reading as a deferral

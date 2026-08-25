@@ -414,3 +414,37 @@ def test_may_context_round19_dodges_and_hedges() -> None:
         "the tenant asserts independence from the co-signer",
     ):
         assert reject_model_numerics(legal, "notes")
+
+
+def test_may_month_uses_closed_class_lookahead() -> None:
+    """Round-20: the modal false-positive family survives any finite verb
+    list (English verbs are open class), so the rule is inverted: after a
+    preposition, 'may' is the MONTH only when a sentence boundary or a
+    closed-class token follows."""
+    from agent.models import reject_model_numerics
+
+    for month in (
+        "the docket shows a May continuance",
+        "staff noted a May reset of the hearing",
+        "the tenant's May hearing was moved",
+        "this May setting conflicts with the notice",
+        "continued till May",
+        "slid toward May",
+        "lands on May",
+        "in May the hearing was reset",
+        "due by May.",
+    ):
+        with pytest.raises(ValueError):
+            reject_model_numerics(month, "notes")
+    for modal in (
+        "the person the notice was handed to may reside elsewhere",
+        "the relief the tenant is entitled to may include possession",
+        "the docket the filing belongs to may list a hearing",
+        "the amount the ledger points to may consist of late fees",
+        "the defect complained of may invalidate the service",
+        "the problem complained of may well be defective service",
+        "the posting spoken of may or might not have occurred",
+        "service may be defective",
+        "this may reflect a recording error",
+    ):
+        assert reject_model_numerics(modal, "notes")

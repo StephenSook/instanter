@@ -448,39 +448,38 @@ _NUMBER_WORDS = frozenset(
 # recognized by DATE CONTEXT instead, on the casefolded shadows, so every
 # casing is covered while the modal stays legal: a preposition or a
 # date-qualifier immediately before "may" is the month position.
-_MODAL_CONTINUATIONS = (
-    "be|have|has|had|not|no|never|also|still|already|require|requires|need|"
-    "needs|reflect|reflects|indicate|indicates|differ|differs|apply|applies|"
-    "exist|exists|remain|remains|suggest|suggests|show|shows|warrant|"
-    "warrants|prove|proves|affect|affects|change|changes|move|moves|turn|"
-    "turns|depend|depends|vary|varies|mean|means|matter|matters|"
-    # Round 19: hedge verbs one step outside the original list kept false
-    # positive on "the defect complained of may <verb>..." relative
-    # clauses; adverb and conjunction continuations ("may well", "may or
-    # might not", "may in fact") are modal frames too.
-    "invalidate|invalidates|amount|amounts|constitute|constitutes|lack|"
-    "lacks|arise|arises|occur|occurs|happen|happens|follow|follows|come|"
-    "become|becomes|present|presents|involve|involves|extend|extends|"
-    "delay|delays|explain|explains|render|renders|entitle|entitles|"
-    "justify|justifies|support|supports|undermine|undermines|excuse|"
-    "excuses|void|voids|hinge|hinges|bear|bears|well|or|even|yet|thus|"
-    "therefore|instead|in|fact|simply|only|merely"
+# Closed-class tokens that may FOLLOW the month ("in May the hearing was
+# reset"). English verbs are an open class, so enumerating what follows a
+# MODAL was a list that lost a round every time it was widened (round 19
+# added forty verbs and round 20 still found "may reside", "may include",
+# "may consist"). The rule is inverted here: after a preposition, "may" is
+# the MONTH only when a sentence boundary or a CLOSED-class token follows;
+# anything open-class (that is, a verb) reads as the modal. Conjunctions
+# and adverbs are deliberately absent: "may or might", "may well be".
+_MONTH_FOLLOWERS = (
+    "the|a|an|this|that|these|those|his|her|its|their|our|your|per|as|at|"
+    "with|without|under|over|between|of|in|on|by|for|to|from"
 )
 _MAY_MONTH_NOUNS = (
     "hearing|hearings|deadline|deadlines|docket|dockets|calendar|"
-    "calendars|term|terms|session|sessions|date|dates|cycle|cycles|court"
+    "calendars|term|terms|session|sessions|date|dates|cycle|cycles|court|"
+    # Round 20: a continuance or a reset IS the deadline-change event this
+    # drafter narrates, so the attributive frame must cover it.
+    "continuance|continuances|reset|resets|setting|settings|trial|trials|"
+    "status|filing|filings"
 )
 _MAY_DATE_CONTEXT = re.compile(
-    # Preposition/qualifier + may, NOT followed by a modal continuation
-    # ("due by May" is the month; "described by may already be on file" is
-    # the modal). "this" is deliberately absent: "this may reflect..." is
-    # the commonest hedge frame and "this May" the rarest month frame.
+    # Preposition/qualifier + may + (sentence boundary | closed-class word).
     r"\b(?:in|by|since|until|before|after|during|of|from|for|to|into|through"
-    r"|next|last|early|late|mid)"
-    rf"[\s-]+may\b(?!\s+(?:{_MODAL_CONTINUATIONS})\b)"
-    # Attributive month with articles and plurals: "the May hearings",
-    # "a May court date".
-    rf"|\b(?:the|a|an|each|every|any)[\s-]+may[\s-]+(?:{_MAY_MONTH_NOUNS})\b"
+    r"|till|until|toward|towards|on|next|last|early|late|mid)"
+    r"[\s-]+may\b"
+    rf"(?=\s*(?:[.,;:!?)\]]|$)|\s+(?:{_MONTH_FOLLOWERS})\b)"
+    # Attributive month, any determiner, singular or plural noun: "the May
+    # hearings", "a May continuance", "their May setting".
+    # Possessive nouns are determiners too ("the tenant's May hearing").
+    r"|\b(?:the|a|an|each|every|any|this|that|their|his|her|its|our|your"
+    r"|[a-z]+'s)"
+    rf"[\s-]+may[\s-]+(?:{_MAY_MONTH_NOUNS})\b"
     # Month-first, possessive, and idiomatic frames: "May arrives",
     # "May's docket", "come May".
     r"|\bmay[\s-]+(?:arrives|arrive|begins|begin|starts|start|ends|end)\b"

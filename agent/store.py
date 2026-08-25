@@ -288,10 +288,17 @@ class JsonFileCaseStore:
             # of ONE docket, and both rows must be contested, never swept
             # as two urgent cases holding two capacity slots. Dedup contest
             # only; stored ids are never rewritten.
-            # o->0, l/i->1, s->5, b->8, z->2: the hand-keying and OCR
-            # confusable family (round 19 reproduced the S-for-5 twin
-            # taking a capacity slot exactly as the O-for-0 twin had).
-            confusables = str.maketrans("olisbz", "011582")
+            # The letter-for-digit lookalike class, decided ONCE rather
+            # than one pair per review round (O/0, then S/5, then G/6 each
+            # reproduced the same capacity-displacement defect). RULE for
+            # membership: fold a lookalike letter unless it appears in the
+            # jurisdiction's STRUCTURAL docket prefix, where folding would
+            # collapse legitimately distinct divisions. Georgia
+            # dispossessory ids read like 26ED00101, so d and t stay
+            # unfolded (a folded d would merge the ED division with a
+            # hypothetical EO one); o, l, i, s, b, z, g, q carry no
+            # structural role in that format.
+            confusables = str.maketrans("olisbzgq", "01158269")
             return "".join(case_id.split()).casefold().translate(confusables)
 
         counts: dict[str, int] = {}
