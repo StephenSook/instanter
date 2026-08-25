@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from agent.audit import JsonlAuditSink
+from agent.hooks import bind_approval
 from agent.run_context import RunContext
 from agent.runner import run_deterministic
 from agent.store import IntakeParseError, IntakeRecord, JsonFileCaseStore, to_case_input
@@ -161,6 +162,9 @@ def test_commit_requires_every_rationale(tmp_path: Path) -> None:
     ctx = make_ctx(tmp_path, [make_record(service_date="2026-09-01")], capacity=1)
     tools = build_tools(ctx)
     tools["get_ranked_queue"]()
+    assert "NOT APPROVED" in tools["commit_escalations"]()
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, tuple(d.case_id for d in ctx.interrupt_candidates))
     result = tools["commit_escalations"]()
     assert "MISSING RATIONALES" in result
 
@@ -178,8 +182,9 @@ def test_packet_memo_only_for_committed_and_no_advice(tmp_path: Path) -> None:
         confidence=0.9,
     )
     assert "NOT COMMITTED" in tools["write_packet_memo"](case_id=interrupt_id, memo="memo")
-    tools["commit_escalations"]()
     ctx.attorney_action = "approved"
+    bind_approval(ctx, tuple(d.case_id for d in ctx.interrupt_candidates))
+    tools["commit_escalations"]()
     poisoned = tools["write_packet_memo"](
         case_id=interrupt_id, memo="The tenant should raise the defense of tender."
     )

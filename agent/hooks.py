@@ -19,6 +19,38 @@ from agent.run_context import RunContext
 _GATED_TOOL = "commit_escalations"
 
 
+def presented_content_digest(ctx: RunContext, case_ids: tuple[str, ...]) -> str:
+    """Digest of everything the attorney is shown for these cases: id,
+    rank, days remaining, factors, and the exact rationale text. Approval
+    binds to this content; any change to it voids the approval."""
+    digest = hashlib.sha256()
+    for case_id in sorted(case_ids):
+        decision = ctx.decision_for(case_id)
+        rationale = ctx.rationales.get(case_id)
+        digest.update(case_id.encode())
+        digest.update(b"\x00")
+        if decision is not None:
+            digest.update(str(decision.rank).encode())
+            digest.update(b"\x00")
+            digest.update(str(decision.days_remaining).encode())
+            digest.update(b"\x00")
+            for factor in decision.factors:
+                digest.update(factor.encode())
+                digest.update(b"\x00")
+        digest.update((rationale.rationale if rationale else "").encode())
+        digest.update(b"\x01")
+    return digest.hexdigest()
+
+
+def bind_approval(ctx: RunContext, case_ids: tuple[str, ...]) -> str:
+    """Record the immutable approval snapshot: the case ids and the digest
+    of the presented content. Returns the digest."""
+    digest = presented_content_digest(ctx, case_ids)
+    ctx.approved_case_ids = case_ids
+    ctx.approval_digest = digest
+    return digest
+
+
 def parse_attorney_response(response: object) -> tuple[str, str]:
     """Strict, fail-closed parse of an attorney response.
 
@@ -93,6 +125,41 @@ class AttorneyApprovalHook(HookProvider):
                 + ", ".join(unrationalized)
             )
             return
+        # Capture the presented-content digest BEFORE the interrupt
+        # suspends. Strands re-executes this callback when the interrupt
+        # resumes, rebuilding everything from mutable RunContext state, so
+        # the digest recorded on the first pass is what proves the state
+        # did not shift under the attorney during the pause.
+        presented_ids = tuple(d.case_id for d in self._ctx.interrupt_candidates)
+        current_digest = presented_content_digest(self._ctx, presented_ids)
+        if self._ctx.pending_approval_digest is None:
+            self._ctx.pending_approval_digest = current_digest
+        elif self._ctx.pending_approval_digest != current_digest:
+            # The queue or a rationale changed while the approval was
+            # pending: whatever the attorney answered, it was about content
+            # that no longer exists. Void the exchange, fail closed.
+            self._ctx.attorney_action = "deferred"
+            self._ctx.pending_approval_digest = None
+            self._ctx.audit.append(
+                AuditEvent(
+                    kind="attorney_decision",
+                    case_id=None,
+                    payload={
+                        "action": "deferred",
+                        "reason": (
+                            "presented content changed while approval was "
+                            "pending; a fresh interrupt is required"
+                        ),
+                    },
+                    run_id=self._ctx.run_id,
+                )
+            )
+            event.cancel_tool = (
+                "STATE CHANGED DURING APPROVAL: the queue or a rationale "
+                "changed while the attorney decision was pending; the "
+                "commit was deferred and requires a fresh approval."
+            )
+            return
         candidates = [
             {
                 "case_id": d.case_id,
@@ -130,17 +197,11 @@ class AttorneyApprovalHook(HookProvider):
         }
         if action == "approved":
             # Bind the approval to exactly what was presented: the case ids
-            # and a digest of the rationale texts the attorney saw.
-            snapshot = tuple(d.case_id for d in self._ctx.interrupt_candidates)
-            self._ctx.approved_case_ids = snapshot
-            digest = hashlib.sha256()
-            for case_id in sorted(snapshot):
-                digest.update(case_id.encode())
-                digest.update(b"\x00")
-                digest.update(self._ctx.rationales[case_id].rationale.encode())
-                digest.update(b"\x00")
-            payload["approved_cases"] = list(snapshot)
-            payload["rationale_digest"] = digest.hexdigest()
+            # and the digest captured before the interrupt suspended.
+            digest = bind_approval(self._ctx, presented_ids)
+            payload["approved_cases"] = list(presented_ids)
+            payload["content_digest"] = digest
+        self._ctx.pending_approval_digest = None
         self._ctx.audit.append(
             AuditEvent(
                 kind="attorney_decision",

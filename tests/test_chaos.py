@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from agent.audit import JsonlAuditSink
+from agent.hooks import bind_approval
 from agent.run_context import RunContext
 from agent.runner import run_deterministic
 from agent.store import EscalationRecord, IntakeRecord, JsonFileCaseStore
@@ -177,6 +178,8 @@ def test_store_failure_mid_commit_is_loud_and_exact(tmp_path: Path) -> None:
             rationale="Deadline has passed with no answer on file.",
             confidence=0.9,
         )
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, tuple(d.case_id for d in ctx.interrupt_candidates))
 
     result = tools["commit_escalations"]()
 
@@ -245,6 +248,8 @@ def test_commit_retry_after_partial_failure_never_duplicates(tmp_path: Path) -> 
             rationale="Deadline has passed with no answer on file.",
             confidence=0.9,
         )
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, tuple(d.case_id for d in ctx.interrupt_candidates))
 
     first = tools["commit_escalations"]()
     assert "STORE WRITE FAILED" in first
@@ -384,7 +389,7 @@ def test_refusals_are_audited(tmp_path: Path) -> None:
     tools["get_ranked_queue"]()
     interrupt_id = ctx.interrupt_candidates[0].case_id
 
-    tools["commit_escalations"]()  # missing rationale -> refused
+    tools["commit_escalations"]()  # no approval recorded -> refused
     tools["submit_escalation_rationale"](
         case_id=interrupt_id,
         disposition="monitor",  # ladder said interrupt -> mismatch
@@ -400,6 +405,7 @@ def test_refusals_are_audited(tmp_path: Path) -> None:
         confidence=0.9,
     )
     ctx.attorney_action = "approved"
+    bind_approval(ctx, tuple(d.case_id for d in ctx.interrupt_candidates))
     tools["commit_escalations"]()
     tools["commit_escalations"]()  # second call -> already committed
     tools["write_packet_memo"](
@@ -412,7 +418,7 @@ def test_refusals_are_audited(tmp_path: Path) -> None:
     assert "memo_rejected" in kinds
     events = ctx.audit.read_all()  # type: ignore[attr-defined]
     reasons = {e["payload"].get("reason") for e in events if e["kind"] == "commit_refused"}
-    assert reasons == {"missing_rationales", "already_committed"}
+    assert reasons == {"not_approved", "already_committed"}
 
 
 # --- A raising graph must not skip the floor ----------------------------------
@@ -580,6 +586,8 @@ def test_ambiguous_store_failure_retry_never_duplicates(tmp_path: Path) -> None:
             confidence=0.9,
         )
 
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, tuple(d.case_id for d in ctx.interrupt_candidates))
     store.fail_next = 1  # first write lands durably but reports failure
     first = tools["commit_escalations"]()
     assert "STORE WRITE FAILED" in first
@@ -616,7 +624,7 @@ def test_post_approval_failure_recovers_through_the_floor(
                 for d in ctx.interrupt_candidates:
                     ctx.rationales[d.case_id] = _template_rationale(d)
                 ctx.attorney_action = "approved"
-                ctx.approved_case_ids = tuple(d.case_id for d in ctx.interrupt_candidates)
+                bind_approval(ctx, tuple(d.case_id for d in ctx.interrupt_candidates))
                 raise RuntimeError("executor died before the commit")
 
         return G()
@@ -714,7 +722,7 @@ def test_commit_never_exceeds_the_approval_snapshot(tmp_path: Path) -> None:
         )
     # The attorney approved ONLY A-1 (snapshot from an earlier queue state).
     ctx.attorney_action = "approved"
-    ctx.approved_case_ids = ("A-1",)
+    bind_approval(ctx, ("A-1",))
     result = tools["commit_escalations"]()
     assert "Committed 1 escalation(s): A-1" in result
     stored = ctx.store.list_escalations(run_id=ctx.run_id)

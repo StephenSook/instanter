@@ -44,6 +44,12 @@ class RunContext:
     # outside the snapshot may ever be committed under that approval, and a
     # changed queue requires a fresh interrupt.
     approved_case_ids: tuple[str, ...] | None = None
+    # Digest of the full presented content (case ids, ranks, days, factors,
+    # rationale texts) captured BEFORE the interrupt suspends, re-verified
+    # when the interrupt resumes AND again at commit time: state that
+    # changed during the pause voids the approval, fail closed.
+    pending_approval_digest: str | None = None
+    approval_digest: str | None = None
     # Single-use lifecycle: a context that already carried a run must never
     # carry another. Reuse would replay stale decisions and committed ids
     # under the same run_id; the runner enforces this at entry.
