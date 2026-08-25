@@ -9,14 +9,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.stephensookra.instanter",
-      "buildNumber": "1",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "com.stephensookra.instanter",
-      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
