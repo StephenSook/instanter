@@ -11,6 +11,7 @@ not the first.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 from dataclasses import asdict, dataclass
@@ -73,6 +74,16 @@ def validate_intake_types(record: IntakeRecord) -> None:
             raise IntakeParseError(
                 f"case {record.case_id!r}: {name} must be a string, got {getattr(record, name)!r}"
             )
+    # The COMPLETE case-id contract, enforced where violations become
+    # per-row refusals: a sixty-five-character id that only detonates in a
+    # downstream Pydantic model (EscalationRationale caps at 64) would
+    # abort the whole sweep instead of refusing one row.
+    if not record.case_id or len(record.case_id) > 64:
+        raise IntakeParseError(f"case {record.case_id[:80]!r}: case_id must be 1-64 characters")
+    if any(not ch.isprintable() for ch in record.case_id):
+        raise IntakeParseError(
+            f"case {record.case_id!r}: case_id must contain only printable characters"
+        )
     for name in ("answer_filed", "amended_affidavit"):
         if type(getattr(record, name)) is not bool:
             raise IntakeParseError(
@@ -298,32 +309,65 @@ class JsonFileCaseStore:
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
+    def _manifest_path(self, run_id: str) -> Path:
+        # One crash-atomic file PER RUN (the filename is the run id's
+        # digest, so an arbitrary run id can never traverse the path): a
+        # torn write for one run must never wedge every other sweep the
+        # way a shared appended sidecar would.
+        return self._manifests_path / (hashlib.sha256(run_id.encode()).hexdigest() + ".json")
+
     def reserve_run_manifest(self, manifest: RunManifest) -> RunManifest:
-        """Insert-if-absent under the interprocess lock, fsynced: the first
-        writer's manifest is the durable truth for this run id."""
-        with self._manifests_path.open("a+") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                handle.seek(0)
-                for line in handle:
-                    if not line.strip():
-                        continue
-                    existing = json.loads(line)
-                    if existing.get("run_id") == manifest.run_id:
-                        return RunManifest(
-                            run_id=existing["run_id"],
-                            inputs_digest=existing["inputs_digest"],
-                            candidates=tuple(existing["candidates"]),
-                            run_date=existing["run_date"],
-                            capacity=existing["capacity"],
-                        )
-                handle.seek(0, os.SEEK_END)
-                handle.write(json.dumps(asdict(manifest)) + "\n")
+        """Crash-atomic insert-if-absent: the manifest is written complete
+        to a temporary file (fsynced), then installed with an atomic
+        hard-link that fails if a manifest already exists, and the
+        directory is fsynced. A reader can therefore never observe a
+        partial manifest; a corrupt file is a loud, named error scoped to
+        its one run."""
+        if self._manifests_path.exists() and not self._manifests_path.is_dir():
+            # A file at this name is the retired shared-sidecar layout,
+            # replaced because one torn append wedged every run. Refuse
+            # loudly with the fix rather than crashing on mkdir.
+            raise ValueError(
+                f"{self._manifests_path} is a file from the retired "
+                "shared-sidecar manifest layout; remove it (after "
+                "reconciling any in-flight runs) so per-run manifests can "
+                "be stored in a directory of that name."
+            )
+        self._manifests_path.mkdir(parents=True, exist_ok=True)
+        final = self._manifest_path(manifest.run_id)
+        if not final.exists():
+            temp = self._manifests_path / f".tmp-{os.getpid()}-{id(manifest):x}"
+            with temp.open("w") as handle:
+                json.dump(asdict(manifest), handle)
                 handle.flush()
                 os.fsync(handle.fileno())
+            try:
+                os.link(temp, final)  # atomic create-if-absent
+            except FileExistsError:
+                pass  # another writer reserved first; its manifest governs
             finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        return manifest
+                temp.unlink(missing_ok=True)
+            directory_fd = os.open(self._manifests_path, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        try:
+            data = json.loads(final.read_text())
+            return RunManifest(
+                run_id=data["run_id"],
+                inputs_digest=data["inputs_digest"],
+                candidates=tuple(data["candidates"]),
+                run_date=data["run_date"],
+                capacity=data["capacity"],
+            )
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ValueError(
+                f"run manifest {final} for run {manifest.run_id!r} is corrupt "
+                "or has an invalid schema; staff must reconcile the "
+                "escalation store and remove the manifest file before any "
+                "retry of this run id. Other run ids are unaffected."
+            ) from exc
 
     def list_escalations(self, run_id: str | None = None) -> list[EscalationRecord]:
         if not self._escalations_path.exists():

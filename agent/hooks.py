@@ -62,6 +62,24 @@ def bind_approval(ctx: RunContext, case_ids: tuple[str, ...]) -> str:
     return digest
 
 
+_RESPONSE_DETAIL_LIMIT = 2000
+
+
+def response_audit_fields(response: object) -> dict[str, Any]:
+    """The attorney's words, reconstructible from the audit trail: stored
+    verbatim when bounded; for an enormous response, a bounded excerpt
+    plus the full content's digest and length, so the record still proves
+    exactly what was said without an unbounded audit row."""
+    detail = str(response).strip()
+    if len(detail) <= _RESPONSE_DETAIL_LIMIT:
+        return {"detail": detail}
+    return {
+        "detail_excerpt": detail[:_RESPONSE_DETAIL_LIMIT],
+        "detail_sha256": hashlib.sha256(detail.encode()).hexdigest(),
+        "detail_length": len(detail),
+    }
+
+
 def parse_attorney_response(response: object) -> tuple[str, str]:
     """Strict, fail-closed parse of an attorney response.
 
@@ -202,15 +220,15 @@ class AttorneyApprovalHook(HookProvider):
                 "run_id": self._ctx.run_id,
             },
         )
-        # The attorney's actual words are recorded verbatim on BOTH
-        # branches; the audit trail exists to preserve exactly this.
+        # The attorney's actual words are recorded on BOTH branches:
+        # verbatim when bounded, digest-anchored when enormous; the audit
+        # trail exists to preserve exactly this.
         action, reason = parse_attorney_response(response)
-        detail = str(response).strip()
         self._ctx.attorney_action = action
         payload: dict[str, Any] = {
             "action": action,
-            "detail": detail[:400],
             "reason": reason,
+            **response_audit_fields(response),
         }
         if action == "approved":
             # Bind the approval to exactly what was presented: the case ids
