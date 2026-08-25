@@ -17,7 +17,7 @@
   /* Urgency bands ARE the folder colors. One band, one hue, everywhere:
      queue tab, folder body, packet punch-holes, countdown chip. */
   --color-l1: #c2352b; /* interrupt now */
-  --color-l2: #cf7a1c; /* surface today */
+  --color-l2: #a85f14; /* surface today */
   --color-l3: #2f5fb3; /* monitor */
   --color-l0: #55665d; /* hold: answer already filed */
 

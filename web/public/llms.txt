@@ -1,0 +1,22 @@
+# Instanter
+
+> A background triage agent for eviction-defense clinics. It computes Georgia
+> dispossessory answer deadlines from the statute, ranks a clinic's queue by
+> urgency, rations attorney interrupts to real capacity, and pauses for a
+> licensed human before committing any escalation.
+
+Instanter states operative facts for a licensed attorney and never gives legal
+advice. Every case record shown in the console is synthetic and labelled as
+such; the statute, the court calendar, and every computation are real.
+
+## Check the claim yourself
+
+- [Live recomputation](https://d2ew2t4uldglcr.cloudfront.net/api/stats): recomputes
+  every answer deadline in the corpus on each request and reports how many of them
+  counting seven days by hand gets wrong. Nothing is cached.
+- [Health](https://d2ew2t4uldglcr.cloudfront.net/api/health)
+
+## Source
+
+- [Repository](https://github.com/StephenSook/instanter), Apache-2.0
+- Authority: O.C.G.A. 44-7-51(b), O.C.G.A. 1-3-1(d)(3), O.C.G.A. 1-4-1

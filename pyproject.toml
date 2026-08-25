@@ -43,7 +43,16 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["engine", "agent", "tests"]
+files = ["engine", "agent", "tests", "infra/door"]
+# The door Lambda ships as a flat bundle, so `handler` is a top-level module
+# both in the deployment package and to its tests. Putting it on the path here
+# means the public endpoint is type-checked under the same strict settings as
+# the engine, rather than being excused for living outside the package.
+mypy_path = "infra/door"
+
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

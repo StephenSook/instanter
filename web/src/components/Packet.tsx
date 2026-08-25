@@ -62,7 +62,7 @@ export function Packet({
           &larr; Back to the cabinet
         </button>
         <h1 className="display mt-5 text-[clamp(2.6rem,8vw,6.5rem)]">{caseRecord.case_id}</h1>
-        <p className="mt-3 font-mono text-[0.72rem] tracking-[0.16em] text-white/45 uppercase">
+        <p className="mt-3 font-mono text-[0.72rem] tracking-[0.16em] text-white/55 uppercase">
           {band.label} &middot; rank {caseRecord.rank} &middot; {countdown(caseRecord.days_remaining)}
         </p>
       </div>

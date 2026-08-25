@@ -1,0 +1,17 @@
+{
+  "app": ".venv-cdk/bin/python app.py",
+  "watch": {
+    "exclude": [
+      "**/.venv/**",
+      "build/**"
+    ]
+  },
+  "context": {
+    "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/aws-iam:minimizePolicies": true,
+    "@aws-cdk/core:validateSnapshotRemovalPolicy": true,
+    "@aws-cdk/aws-s3:createDefaultLoggingPolicy": true,
+    "@aws-cdk/aws-cloudfront:useOriginAccessControl": true
+  }
+}

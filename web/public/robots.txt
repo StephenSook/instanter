@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+Disallow: /api/run
+Sitemap: https://d2ew2t4uldglcr.cloudfront.net/sitemap.xml

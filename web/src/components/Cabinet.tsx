@@ -91,7 +91,7 @@ export function Cabinet({ snapshot, onOpen }: { snapshot: QueueSnapshot; onOpen:
 function Stat({ label, value, tone }: { label: string; value: number; tone?: string }) {
   return (
     <div>
-      <dt className="font-mono text-[0.62rem] tracking-[0.2em] text-white/40 uppercase">{label}</dt>
+      <dt className="font-mono text-[0.62rem] tracking-[0.2em] text-white/60 uppercase">{label}</dt>
       <dd className="display mt-1.5 text-[2.6rem]" style={tone ? { color: tone } : undefined}>
         {value}
       </dd>
@@ -128,13 +128,13 @@ function Band({
             className="group relative rounded-t-[14px] px-5 pt-2.5 pb-3 text-left transition-transform duration-200 ease-[var(--ease-folder)] hover:-translate-y-1"
           >
             <span className="block font-serif text-[1.02rem] leading-none text-white">{c.case_id}</span>
-            <span className="mt-1 block font-mono text-[0.6rem] tracking-wide text-white/75 uppercase">
+            <span className="mt-1 block font-mono text-[0.6rem] tracking-wide text-white uppercase">
               {countdown(c.days_remaining)}
             </span>
           </button>
         ))}
         {cases.length > 6 && (
-          <span className="mb-2 ml-2 font-mono text-[0.62rem] text-white/40">
+          <span className="mb-2 ml-2 font-mono text-[0.62rem] text-white/60">
             +{cases.length - 6} more
           </span>
         )}
@@ -149,7 +149,7 @@ function Band({
           className="mx-auto flex w-full max-w-[1400px] items-center justify-between gap-6 px-5 py-4 text-left sm:px-10"
         >
           <span className="display text-[clamp(1.35rem,3.2vw,2.4rem)] text-white">{meta.label}</span>
-          <span className="flex items-center gap-3 font-mono text-[0.66rem] tracking-[0.18em] text-white/85 uppercase">
+          <span className="flex items-center gap-3 font-mono text-[0.66rem] tracking-[0.18em] text-white uppercase">
             {meta.short} &middot; {cases.length} case{cases.length === 1 ? "" : "s"}
             <span aria-hidden="true" className="text-base leading-none">
               {isOpen ? "⌄" : "‹"}
