@@ -153,13 +153,28 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 continue
             rule = RULES.get(record.jurisdiction_id)
             if rule is None:
-                # Refusal is a case-level fact, not a crash: unsupported rows
-                # surface for a human with no computed deadline.
-                from engine.rules import GEORGIA_RULE
-
-                result = compute_deadline(case_input, GEORGIA_RULE)
-            else:
-                result = compute_deadline(case_input, rule)
+                # Refuse over guessing: computing a typo'd or unsupported
+                # jurisdiction under the Georgia rule surfaces it as a calm
+                # L2 row and lets the run read green over a case the sweep
+                # never protected. No rule row = a case-level refusal that
+                # reaches the report and fails the run.
+                reason = (
+                    f"jurisdiction {record.jurisdiction_id!r} has no rule "
+                    "row; the sweep refuses to compute a deadline under "
+                    "another jurisdiction's authority"
+                )
+                refused.append({"case_id": record.case_id, "reason": reason})
+                ctx.refused_cases[record.case_id] = reason
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="case_refused",
+                        case_id=record.case_id,
+                        payload={"reason": reason},
+                        run_id=ctx.run_id,
+                    )
+                )
+                continue
+            result = compute_deadline(case_input, rule)
             ctx.deadlines[record.case_id] = result
             ctx.audit.append(
                 AuditEvent(

@@ -74,9 +74,92 @@ _DEFENSE_COUPLING = re.compile(
     r"\b(defense|defective|tender|counterclaim|estoppel|retaliation|habitability|jury)\b"
 )
 
+# NFKC folds compatibility forms (fullwidth, ligatures) but deliberately
+# never folds Cyrillic or Greek letters into Latin, which is exactly the
+# gap a lookalike payload walks through (a "You should ..." whose o is the
+# Cyrillic letter). Common homoglyphs are folded to their Latin lookalikes
+# BEFORE any matching (keys are escape sequences so the source itself
+# carries no ambiguous glyphs); anything rarer trips the mixed-script
+# check below.
+_HOMOGLYPH_FOLD = str.maketrans(
+    {
+        # Cyrillic lowercase (matching runs on casefolded text)
+        "\u0430": "a",  # CYRILLIC SMALL LETTER A
+        "\u0435": "e",  # CYRILLIC SMALL LETTER IE
+        "\u043e": "o",  # CYRILLIC SMALL LETTER O
+        "\u0440": "p",  # CYRILLIC SMALL LETTER ER
+        "\u0441": "c",  # CYRILLIC SMALL LETTER ES
+        "\u0443": "y",  # CYRILLIC SMALL LETTER U
+        "\u0445": "x",  # CYRILLIC SMALL LETTER HA
+        "\u0456": "i",  # CYRILLIC SMALL LETTER BYELORUSSIAN-UKRAINIAN I
+        "\u0458": "j",  # CYRILLIC SMALL LETTER JE
+        "\u0455": "s",  # CYRILLIC SMALL LETTER DZE
+        "\u04bb": "h",  # CYRILLIC SMALL LETTER SHHA
+        "\u0501": "d",  # CYRILLIC SMALL LETTER KOMI DE
+        "\u051b": "q",  # CYRILLIC SMALL LETTER QA
+        "\u051d": "w",  # CYRILLIC SMALL LETTER WE
+        # Greek lowercase
+        "\u03bf": "o",  # GREEK SMALL LETTER OMICRON
+        "\u03b1": "a",  # GREEK SMALL LETTER ALPHA
+        "\u03b5": "e",  # GREEK SMALL LETTER EPSILON
+        "\u03b9": "i",  # GREEK SMALL LETTER IOTA
+        "\u03ba": "k",  # GREEK SMALL LETTER KAPPA
+        "\u03bd": "v",  # GREEK SMALL LETTER NU
+        "\u03c1": "p",  # GREEK SMALL LETTER RHO
+        "\u03c4": "t",  # GREEK SMALL LETTER TAU
+        "\u03c5": "u",  # GREEK SMALL LETTER UPSILON
+        "\u03c7": "x",  # GREEK SMALL LETTER CHI
+    }
+)
+
+# Words that politely precede an imperative without changing it ("Please
+# file...", "Kindly pay..."). Skipped when locating the operative first
+# word of a sentence; matching is fail-closed, so over-skipping only makes
+# the floor stricter.
+_IMPERATIVE_PREFIX_WORDS = frozenset(
+    {
+        "please",
+        "kindly",
+        "just",
+        "simply",
+        "do",
+        "now",
+        "then",
+        "also",
+        "next",
+        "first",
+        "immediately",
+        "urgently",
+        "promptly",
+        "today",
+    }
+)
+
+_EDGE_PUNCTUATION = re.compile(r"^[^0-9a-z]+|[^0-9a-z]+$")
+
+
+def _mixed_script_token(text: str) -> str | None:
+    """A token mixing Latin letters with another script is a lookalike
+    payload this floor cannot read reliably; fail closed on it. Whole-token
+    non-Latin text (a name, a quoted phrase) does not trip this."""
+    for token in text.split():
+        scripts = set()
+        for ch in token:
+            if ch.isalpha():
+                scripts.add(unicodedata.name(ch, "UNKNOWN").split(" ", 1)[0])
+        if "LATIN" in scripts and len(scripts) > 1:
+            return token
+    return None
+
 
 def _reject_advice_language(text: str, field_name: str) -> str:
-    normalized = unicodedata.normalize("NFKC", text).casefold()
+    normalized = unicodedata.normalize("NFKC", text).casefold().translate(_HOMOGLYPH_FOLD)
+    mixed = _mixed_script_token(normalized)
+    if mixed is not None:
+        raise ValueError(
+            f"{field_name} contains the mixed-script lookalike token "
+            f"{mixed!r}; this floor cannot read it reliably and fails closed"
+        )
     for phrase in _ADVICE_PHRASES:
         if phrase in normalized:
             raise ValueError(
@@ -94,11 +177,17 @@ def _reject_advice_language(text: str, field_name: str) -> str:
             "states facts for a licensed attorney and never advises"
         )
     for sentence in _SENTENCE_SPLIT.split(normalized):
-        first_word = sentence.strip().split(" ", 1)[0] if sentence.strip() else ""
-        if first_word in _LEGAL_ACTION_VERBS:
+        # The operative first word: strip bullet/bracket punctuation from
+        # token edges (interior hyphens survive, so "pay-or-quit notice"
+        # stays factual) and skip polite prefixes ("Please file...").
+        words = [w for w in (_EDGE_PUNCTUATION.sub("", t) for t in sentence.split()) if w]
+        index = 0
+        while index < len(words) and words[index] in _IMPERATIVE_PREFIX_WORDS:
+            index += 1
+        if index < len(words) and words[index] in _LEGAL_ACTION_VERBS:
             raise ValueError(
                 f"{field_name} opens a sentence with the imperative "
-                f"{first_word!r}; this system states facts for a licensed "
+                f"{words[index]!r}; this system states facts for a licensed "
                 "attorney and never advises"
             )
     return text

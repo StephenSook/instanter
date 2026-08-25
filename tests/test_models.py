@@ -114,6 +114,12 @@ ADVICE_PAYLOADS = [
     "Ｆile an answer today",  # noqa: RUF001 (deliberate fullwidth lookalike)
     "The tenant must contest the amount",
     "The tenant needs to respond this week",
+    # Round-7 reproducers: polite prefix, leading bullet, Cyrillic homoglyph
+    "Please file an answer today",
+    "- File an answer today",
+    "Yоu should file an answer today",  # noqa: RUF001 (Cyrillic small o homoglyph)
+    "Kindly pay the rent into the registry",
+    "Тhe tenant should respond",  # noqa: RUF001 (Cyrillic capital Te homoglyph)
 ]
 
 
@@ -137,6 +143,9 @@ FACTUAL_PAYLOADS = [
     "Tenant plans to pay everything owed this week per the notes.",
     "Service was by tack and mail; the mailing date is unverified.",
     "[MODEL DISABLED: templated rationale] This case ranks 1 this run.",
+    # Non-legal imperatives and legal terms in factual positions stay valid
+    "Please review the intake facts with the tenant.",
+    "Pay-or-quit notice dates are recorded in the intake notes.",
 ]
 
 

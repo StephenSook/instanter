@@ -64,6 +64,15 @@ class RunContext:
     # under the same run_id; the runner enforces this at entry.
     started: bool = False
 
+    def __post_init__(self) -> None:
+        # The run id scopes durable idempotency ((run_id, case_id)
+        # insert-if-absent) and stamps every audit row; a malformed id would
+        # silently break both, so it fails here, not at the first write.
+        if not self.run_id or len(self.run_id) > 64:
+            raise ValueError("run_id must be 1-64 characters")
+        if any(ch.isspace() or not ch.isprintable() for ch in self.run_id):
+            raise ValueError("run_id must be printable with no whitespace")
+
     @property
     def interrupt_candidates(self) -> list[TriageDecision]:
         return [d for d in self.decisions if d.interrupt_now]
