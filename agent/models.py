@@ -193,6 +193,14 @@ def _collapse_separated_letters(text: str) -> str:
     return _SEPARATED_RUN.sub(lambda m: re.sub(r"[^0-9a-z]", "", m.group(0)), text)
 
 
+def _strip_intra_token_punctuation(text: str) -> str:
+    """Remove punctuation INSIDE whitespace-delimited tokens ('n-ine' ->
+    'nine', 'f-ile' -> 'file') so a separator between multi-character
+    fragments cannot split a protected word. Token boundaries survive, so
+    'pay-or-quit' becomes 'payorquit', never 'pay'. Matching shadow only."""
+    return " ".join(re.sub(r"[^0-9a-z]+", "", token) for token in text.split())
+
+
 def _collapse_spaced_letters(text: str) -> str:
     """Collapse runs of two-plus single-letter tokens ('F i l e') into one
     word so spacing cannot hide an imperative. Matching shadow only."""
@@ -293,6 +301,8 @@ def _reject_advice_language(text: str, field_name: str) -> str:
         demarked.translate(_LEET_FOLD),
         _collapse_spaced_letters(demarked),
         _collapse_separated_letters(demarked),
+        _strip_intra_token_punctuation(demarked),
+        _strip_intra_token_punctuation(demarked.translate(_LEET_FOLD)),
         canonical,
     }:
         _scan_variant(variant, field_name)
@@ -389,6 +399,7 @@ def reject_model_numerics(text: str, field_name: str) -> str:
         normalized,
         demarked,
         _collapse_separated_letters(demarked),
+        _strip_intra_token_punctuation(demarked),
         canonical,
     }:
         for token in _WORD_TOKEN.findall(variant):

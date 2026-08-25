@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-08-25T00:35:34.436747-04:00",
-  "git_sha": "cd33900cd872054a056a31b1a3a859e0b1db82ae",
-  "inputs_digest": "b2f6daea0aa462e5bfa4097fab0ac7362c55b7c452c51716e404c3547f98f906",
+  "generated_at": "2026-08-25T00:53:34.214136-04:00",
+  "git_sha": "06dea7761584d1373426f2846d8e5c05bb13260c",
+  "inputs_digest": "1c793e8d465c14043e443768cb85be5f3dcc613b2537e8f20993786d8e5cf7d6",
   "seed": "synthetic_intake.json",
   "run_date": "2026-09-09",
   "llm_judges_included": true,
@@ -96,28 +96,28 @@
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales are factual, clear, and provide operative facts without recommending any legal actions or conclusions. They meet the criteria for a score of 1.0."
+      "reason": "The rationales provided in the output contain operative facts only and read clearly, meeting the criteria for a score of 1.0."
     },
     {
       "case": "defer-capacity-2",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales state operative facts only (deadline date, days remaining, queue rank) and read clearly. They do not contain legal advice or conclusions."
+      "reason": "The rationales state operative facts only and read clearly, meeting the criteria for a score of 1.0."
     },
     {
       "case": "approve-capacity-1",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales provided in the output are factual, clear, and include operative facts such as the deadline date, days remaining, and queue rank. There is no legal advice or conclusions, which aligns perfectly with the rubric requirements."
+      "reason": "The rationale states operative facts only (deadline date, days remaining, queue rank) and reads clearly. It does not contain any legal advice or conclusions."
     },
     {
       "case": "approve-capacity-5",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The output contains detailed escalation rationales that state operative facts such as deadline dates, days remaining, service methods, queue ranks, and writer explanations. These rationales do not contain legal advice or conclusions but rather focus on the factual elements relevant to the eviction-defense clinic's supervising attorney. The output also matches the expected output in terms of the 'c"
+      "reason": "The rationales provided in the output contain only operative facts such as deadline dates, days remaining, service methods, and queue ranks. They do not include any legal advice, conclusions, or urgency scores in place of facts, which aligns perfectly with the rubric requirements."
     },
     {
       "case": "chaos-notes-timeout-approve-2",

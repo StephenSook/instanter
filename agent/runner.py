@@ -132,6 +132,24 @@ def _apply_attorney_decision(ctx: RunContext, tools: dict[str, Any], response: s
     from agent.hooks import bind_approval, parse_attorney_response, response_audit_fields
 
     action, reason = parse_attorney_response(response)
+    if action == "invalid":
+        # Not a human decision: no deferral is recorded, the exchange is
+        # voided, and the report's outstanding obligation keeps the run
+        # red until a real response resolves the candidates.
+        ctx.approval_invalidated = True
+        ctx.audit.append(
+            AuditEvent(
+                kind="attorney_decision",
+                case_id=None,
+                payload={
+                    "action": action,
+                    "reason": reason,
+                    **response_audit_fields(response),
+                },
+                run_id=ctx.run_id,
+            )
+        )
+        return
     ctx.attorney_action = action
     if action == "approved" and ctx.approved_case_ids is None:
         # Bind the approval to the presented candidates, same as the hook:

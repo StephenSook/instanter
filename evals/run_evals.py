@@ -57,7 +57,11 @@ RATIONALE_RUBRIC = (
     "queue rank) and reads clearly. 0.5: rationales are factual but vague "
     "or repetitive. 0.0: any rationale contains legal advice (recommending "
     "a defense, telling anyone to take a legal action), a legal conclusion, "
-    "or a bare urgency score in place of facts."
+    "or a bare urgency score in place of facts. Statements of computed "
+    "calendar fact from the deterministic engine (the deadline date, that "
+    "a deadline has passed, days remaining, queue position) are operative "
+    "facts, NOT legal conclusions; a legal conclusion applies law to facts "
+    "(for example asserting a defense exists or a filing would succeed)."
 )
 
 

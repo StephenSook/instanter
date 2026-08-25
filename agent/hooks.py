@@ -69,8 +69,13 @@ def response_audit_fields(response: object) -> dict[str, Any]:
     """The attorney's words, reconstructible from the audit trail: stored
     verbatim when bounded; for an enormous response, a bounded excerpt
     plus the full content's digest and length, so the record still proves
-    exactly what was said without an unbounded audit row."""
-    detail = str(response).strip()
+    exactly what was said without an unbounded audit row. A non-string
+    transport value has no words to record; its type is recorded instead
+    (stringifying an arbitrary object would let a stateful __str__ show
+    the auditor different words than the parser saw)."""
+    if not isinstance(response, str):
+        return {"detail_invalid_type": type(response).__name__}
+    detail = response.strip()
     if len(detail) <= _RESPONSE_DETAIL_LIMIT:
         return {"detail": detail}
     return {
@@ -83,13 +88,21 @@ def response_audit_fields(response: object) -> dict[str, Any]:
 def parse_attorney_response(response: object) -> tuple[str, str]:
     """Strict, fail-closed parse of an attorney response.
 
-    Returns (action, reason) where action is "approved" or "deferred".
-    Only an EXACT approval approves: qualifiers, typos, and anything
-    ambiguous defer, because a conditional approval flattened into blanket
-    approval is a UPL-grade audit failure while an over-deferral only
-    delays review.
+    Returns (action, reason) where action is "approved", "deferred", or
+    "invalid". Only an EXACT approval approves: qualifiers and typos in a
+    real response defer, because a conditional approval flattened into
+    blanket approval is a UPL-grade audit failure while an over-deferral
+    only delays review. But an EMPTY or NON-STRING value is not a human
+    decision at all: it is "invalid", and the caller must treat the
+    exchange as unresolved (pending review, never a green no-op), because
+    a transport bug that reads as a deferral would silently drop urgent
+    cases from the durable queue.
     """
-    detail = str(response).strip()
+    if not isinstance(response, str):
+        return "invalid", f"response must be a string, got {type(response).__name__}"
+    detail = response.strip()
+    if not detail:
+        return "invalid", "empty response; not a decision"
     normalized = detail.lower().rstrip(".!")
     if normalized in ("approve", "approved", "approve all"):
         return "approved", "exact approval"
@@ -220,16 +233,37 @@ class AttorneyApprovalHook(HookProvider):
                 "run_id": self._ctx.run_id,
             },
         )
-        # The attorney's actual words are recorded on BOTH branches:
+        # The attorney's actual words are recorded on EVERY branch:
         # verbatim when bounded, digest-anchored when enormous; the audit
         # trail exists to preserve exactly this.
         action, reason = parse_attorney_response(response)
-        self._ctx.attorney_action = action
         payload: dict[str, Any] = {
             "action": action,
             "reason": reason,
             **response_audit_fields(response),
         }
+        if action == "invalid":
+            # An empty or non-string value is not a human decision: no
+            # deferral is recorded (a transport bug reading as a deferral
+            # would drop urgent cases behind a green no-op). The exchange
+            # is voided, and the unattended floor delivers the sweep as
+            # pending review with the run reading red.
+            self._ctx.approval_invalidated = True
+            self._ctx.pending_approval_digest = None
+            self._ctx.audit.append(
+                AuditEvent(
+                    kind="attorney_decision",
+                    case_id=None,
+                    payload=payload,
+                    run_id=self._ctx.run_id,
+                )
+            )
+            event.cancel_tool = (
+                f"INVALID RESPONSE: {reason}. The commit was not executed; "
+                "the sweep will be delivered as pending attorney review."
+            )
+            return
+        self._ctx.attorney_action = action
         if action == "approved":
             # Bind the approval to exactly what was presented: the case ids
             # and the digest captured before the interrupt suspended.
