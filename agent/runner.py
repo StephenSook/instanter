@@ -365,115 +365,7 @@ def run_live(
             )
         )
 
-    # Deterministic floor: chaos testing showed the model layer can end a
-    # run without ever reaching the attorney (a node dies, the writer
-    # declines to act on degraded context, or the graph raises). Undertriage
-    # is the catastrophic error, so if no attorney decision was recorded,
-    # the runner itself completes the sweep and commits the interrupt-now
-    # cases as PENDING attorney review. No approval is claimed: the launch
-    # response answered a presented interrupt or nothing; a commit nobody
-    # saw is pending, and the console review is where it gets its human.
-    backstop_used = False
-    tools: dict[str, Any] | None = None
-    if not ctx.attorney_action or ctx.approval_invalidated:
-        # An invalidated approval left candidates NO human resolved (the
-        # recorded deferral is synthetic); the unattended floor owes them a
-        # pending-review commit exactly as if no decision existed.
-        tools = build_tools(ctx)
-        if ctx.interrupt_candidates or not ctx.decisions:
-            backstop_used = True
-            ctx.audit.append(
-                AuditEvent(
-                    kind="deterministic_backstop",
-                    case_id=None,
-                    payload={
-                        "graph_status": graph_status,
-                        "had_ranked_queue": bool(ctx.decisions),
-                        "reason": (
-                            "model layer ended the run without an attorney "
-                            "decision; committing the sweep as pending review"
-                        ),
-                    },
-                    run_id=ctx.run_id,
-                )
-            )
-            _pending_commit(ctx, tools)
-    elif ctx.approved_case_ids is not None:
-        # Approval is a decision, not a completed commit: an exception after
-        # the hook approved but before the writes finished leaves approved
-        # cases undelivered. Recover through the commit tool, which
-        # reconciles against DURABLE store state first, so recovery can
-        # never duplicate a row that actually landed. Keyed on the BOUND
-        # APPROVAL (the immutable obligation the report's parity also uses),
-        # not on the mutable action scalar: a later write to that scalar
-        # must never strand the recovery this branch exists to perform.
-        ctx.attorney_action = "approved"
-        tools = build_tools(ctx)
-        if not ctx.decisions:
-            tools["get_ranked_queue"]()
-        # Recovery is bounded by the approval snapshot: only what the
-        # attorney actually approved may be delivered under this approval.
-        missing = [
-            case_id
-            for case_id in (ctx.approved_case_ids or ())
-            if case_id not in ctx.committed_case_ids
-        ]
-        if missing:
-            backstop_used = True
-            ctx.audit.append(
-                AuditEvent(
-                    kind="deterministic_backstop",
-                    case_id=None,
-                    payload={
-                        "graph_status": graph_status,
-                        "reason": (
-                            "attorney approved but the commit did not complete "
-                            "for every case; recovering through the reconciling "
-                            "commit tool"
-                        ),
-                        "missing_before_recovery": missing,
-                    },
-                    run_id=ctx.run_id,
-                )
-            )
-            for decision in ctx.interrupt_candidates:
-                if decision.case_id in ctx.rationales:
-                    continue
-                ctx.rationales[decision.case_id] = _template_rationale(decision)
-                ctx.audit.append(
-                    AuditEvent(
-                        kind="rationale_recorded",
-                        case_id=decision.case_id,
-                        payload={"template": True},
-                        run_id=ctx.run_id,
-                    )
-                )
-            tools["commit_escalations"]()
-
-    # Attorney-packet completeness: every committed case carries a memo,
-    # whichever path committed it (drafter, floor, or recovery).
-    if (
-        ctx.attorney_action in ("approved", "pending") or ctx.approved_case_ids is not None
-    ) and ctx.committed_case_ids:
-        if tools is None:
-            tools = build_tools(ctx)
-        _ensure_packet_memos(ctx, tools)
-
-    report = _report(ctx, mode="live", backstop_used=backstop_used, model_error=model_error)
-    ctx.audit.append(
-        AuditEvent(
-            kind="run_finished",
-            case_id=None,
-            payload={
-                "status": graph_status,
-                "backstop_used": backstop_used,
-                "failures": list(report.failures),
-                "model_error": model_error,
-            },
-            run_id=ctx.run_id,
-        )
-    )
-    return report
+    return _finish_live(ctx, graph_status, model_error)
 
 
 def _template_rationale(decision: TriageDecision) -> EscalationRationale:
@@ -648,3 +540,124 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def _finish_live(ctx: RunContext, graph_status: str, model_error: str) -> RunReport:
+    """Everything after the graph stops: the deterministic floor, the
+    approved-but-uncommitted recovery, packet-memo completeness, and the
+    report.
+
+    Extracted verbatim from ``run_live`` so the suspend-and-resume path
+    used by the deployed runtime finishes a run through EXACTLY this code
+    rather than a second copy of it. Twenty-four adversarial rounds are
+    encoded in these branches; a parallel implementation would drift.
+    """
+    # Deterministic floor: chaos testing showed the model layer can end a
+    # run without ever reaching the attorney (a node dies, the writer
+    # declines to act on degraded context, or the graph raises). Undertriage
+    # is the catastrophic error, so if no attorney decision was recorded,
+    # the runner itself completes the sweep and commits the interrupt-now
+    # cases as PENDING attorney review. No approval is claimed: the launch
+    # response answered a presented interrupt or nothing; a commit nobody
+    # saw is pending, and the console review is where it gets its human.
+    backstop_used = False
+    tools: dict[str, Any] | None = None
+    if not ctx.attorney_action or ctx.approval_invalidated:
+        # An invalidated approval left candidates NO human resolved (the
+        # recorded deferral is synthetic); the unattended floor owes them a
+        # pending-review commit exactly as if no decision existed.
+        tools = build_tools(ctx)
+        if ctx.interrupt_candidates or not ctx.decisions:
+            backstop_used = True
+            ctx.audit.append(
+                AuditEvent(
+                    kind="deterministic_backstop",
+                    case_id=None,
+                    payload={
+                        "graph_status": graph_status,
+                        "had_ranked_queue": bool(ctx.decisions),
+                        "reason": (
+                            "model layer ended the run without an attorney "
+                            "decision; committing the sweep as pending review"
+                        ),
+                    },
+                    run_id=ctx.run_id,
+                )
+            )
+            _pending_commit(ctx, tools)
+    elif ctx.approved_case_ids is not None:
+        # Approval is a decision, not a completed commit: an exception after
+        # the hook approved but before the writes finished leaves approved
+        # cases undelivered. Recover through the commit tool, which
+        # reconciles against DURABLE store state first, so recovery can
+        # never duplicate a row that actually landed. Keyed on the BOUND
+        # APPROVAL (the immutable obligation the report's parity also uses),
+        # not on the mutable action scalar: a later write to that scalar
+        # must never strand the recovery this branch exists to perform.
+        ctx.attorney_action = "approved"
+        tools = build_tools(ctx)
+        if not ctx.decisions:
+            tools["get_ranked_queue"]()
+        # Recovery is bounded by the approval snapshot: only what the
+        # attorney actually approved may be delivered under this approval.
+        missing = [
+            case_id
+            for case_id in (ctx.approved_case_ids or ())
+            if case_id not in ctx.committed_case_ids
+        ]
+        if missing:
+            backstop_used = True
+            ctx.audit.append(
+                AuditEvent(
+                    kind="deterministic_backstop",
+                    case_id=None,
+                    payload={
+                        "graph_status": graph_status,
+                        "reason": (
+                            "attorney approved but the commit did not complete "
+                            "for every case; recovering through the reconciling "
+                            "commit tool"
+                        ),
+                        "missing_before_recovery": missing,
+                    },
+                    run_id=ctx.run_id,
+                )
+            )
+            for decision in ctx.interrupt_candidates:
+                if decision.case_id in ctx.rationales:
+                    continue
+                ctx.rationales[decision.case_id] = _template_rationale(decision)
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="rationale_recorded",
+                        case_id=decision.case_id,
+                        payload={"template": True},
+                        run_id=ctx.run_id,
+                    )
+                )
+            tools["commit_escalations"]()
+
+    # Attorney-packet completeness: every committed case carries a memo,
+    # whichever path committed it (drafter, floor, or recovery).
+    if (
+        ctx.attorney_action in ("approved", "pending") or ctx.approved_case_ids is not None
+    ) and ctx.committed_case_ids:
+        if tools is None:
+            tools = build_tools(ctx)
+        _ensure_packet_memos(ctx, tools)
+
+    report = _report(ctx, mode="live", backstop_used=backstop_used, model_error=model_error)
+    ctx.audit.append(
+        AuditEvent(
+            kind="run_finished",
+            case_id=None,
+            payload={
+                "status": graph_status,
+                "backstop_used": backstop_used,
+                "failures": list(report.failures),
+                "model_error": model_error,
+            },
+            run_id=ctx.run_id,
+        )
+    )
+    return report
