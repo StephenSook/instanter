@@ -19,7 +19,12 @@ from agent.audit import JsonlAuditSink
 from agent.hooks import bind_approval
 from agent.run_context import RunContext
 from agent.runner import run_deterministic
-from agent.store import EscalationRecord, IntakeRecord, JsonFileCaseStore
+from agent.store import (
+    EscalationRecord,
+    IntakeRecord,
+    JsonFileCaseStore,
+    MalformedIntakeRow,
+)
 from agent.tools import build_tools
 
 RUN_DATE = date(2026, 9, 9)
@@ -2374,3 +2379,77 @@ def test_audit_sink_detects_whole_file_replacement(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="rotated, truncated, or replaced"):
         sink.append(AuditEvent(kind="run_finished", case_id=None, payload={}, run_id="r"))
+
+
+# --- Round-21 reproducers -----------------------------------------------------
+
+
+def _load_ids(
+    tmp_path: Path, ids: list[str], name: str
+) -> tuple[tuple[str, ...], tuple[MalformedIntakeRow, ...]]:
+    intake = _write_intake(
+        tmp_path,
+        [
+            {
+                "case_id": case_id,
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            }
+            for case_id in ids
+        ],
+    )
+    store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / f"{name}.jsonl")
+    result = store.load_intake()
+    return tuple(r.case_id for r in result.records), result.malformed
+
+
+@pytest.mark.parametrize(
+    ("docket", "twin"),
+    [
+        # Round-21 finding 1: the confusable exemption was applied to the
+        # WHOLE id, so lookalikes in the numeric sequence (where no letter
+        # has structural meaning) stayed uncontested and took a capacity
+        # slot from a genuinely distinct urgent case under a green run.
+        ("26ED00101", "26ED0D101"),
+        ("26ED00101", "26ED0010T"),
+        ("26ED00101", "26EDQ0101"),
+        # Round-21 finding 2: separator-formatted ids (a summons prints
+        # the hyphen, a staff entry drops it) were a second identity.
+        ("26ED00101", "26ED-00101"),
+        ("26ED00101", "26ED.00101"),
+        ("26ED00101", "26ED/00101"),
+        ("26ED00101", "26ED_00101"),
+        # Channels closed in earlier rounds, pinned here against the
+        # positional rewrite.
+        ("26ED00101", "26EDO0101"),
+        ("26ED00105", "26ED0010S"),
+        ("26ED00106", "26ED0010G"),
+        ("26ED00122", "26ED0012Z"),
+        ("26ED00101", "26ed00101"),
+        ("26ED00101", "26ED 00101"),
+    ],
+)
+def test_one_docket_two_spellings_always_contests(tmp_path: Path, docket: str, twin: str) -> None:
+    records, malformed = _load_ids(tmp_path, [docket, twin], "twin")
+    assert records == ()  # neither spelling sweeps alone
+    assert malformed
+
+
+@pytest.mark.parametrize(
+    "other",
+    ["26EO00101", "26EV00101", "26EM00101", "26SC00101", "26ET00101", "26ED00102"],
+)
+def test_genuinely_distinct_dockets_are_not_contested(tmp_path: Path, other: str) -> None:
+    """The positional rule keeps division letters meaningful: 26ED and
+    26EO are different divisions, not a lookalike pair."""
+    records, malformed = _load_ids(tmp_path, ["26ED00101", other], "distinct")
+    assert len(records) == 2
+    assert malformed == ()
+
+
+def test_real_seed_ids_never_self_contest(tmp_path: Path) -> None:
+    seed = json.loads(SEED.read_text())["records"]
+    records, malformed = _load_ids(tmp_path, [r["case_id"] for r in seed], "seed")
+    assert len(records) == len(seed)
+    assert malformed == ()

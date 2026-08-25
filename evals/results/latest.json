@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-08-25T10:39:33.882631-04:00",
-  "git_sha": "f187d2b49863e981b517b71e8c81179db015e8f1",
-  "inputs_digest": "09c81f782a8a422c1144d5154d812ccedbea09badcf794f7645a5cabbab88bb4",
+  "generated_at": "2026-08-25T11:04:31.721435-04:00",
+  "git_sha": "06506e95b99ebcdc5cd00f6105a5079fcdd88490",
+  "inputs_digest": "f10b33feef5f1d6aa7c68b0dbe4e2906ac01e28acadeb9b269594696e9e0342e",
   "seed": "synthetic_intake.json",
   "run_date": "2026-09-09",
   "llm_judges_included": true,
@@ -96,28 +96,28 @@
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales contain operative facts only and read clearly, meeting the criteria for a score of 1.0. The rest of the output matches the expected output."
+      "reason": "The rationales state operative facts clearly and do not contain legal advice or conclusions."
     },
     {
       "case": "defer-capacity-2",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales state operative facts only (deadline date, days remaining, queue rank) and read clearly. There are no legal conclusions or advice given, aligning perfectly with the rubric's requirements for a score of 1.0."
+      "reason": "The output rationales state operative facts only and read clearly, meeting the criteria for a score of 1.0. The rest of the output matches the expected output."
     },
     {
       "case": "approve-capacity-1",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationale provided is factual, stating the deadline date, days remaining, and queue rank, which aligns with the requirement for operative facts only. There are no legal conclusions or recommendations, so the rationale is scored as 1.0. The additional keys do not affect the score as they are not part of the evaluation criteria."
+      "reason": "The rationales contain only operative facts and read clearly, meeting the criteria for a score of 1.0. The output also matches the expected output in terms of the key elements."
     },
     {
       "case": "approve-capacity-5",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales state operative facts clearly and without legal advice or conclusions. The output matches the expected output in terms of 'committed', 'attorney_action', and 'succeeded'."
+      "reason": "The output matches the expected output in key elements ('attorney_action', 'committed', 'succeeded') and provides additional factual details that do not contradict the expected output. The 'rationales' section contains operative facts only, aligning with the rubric's requirements."
     },
     {
       "case": "chaos-notes-timeout-approve-2",

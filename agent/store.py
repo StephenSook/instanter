@@ -14,6 +14,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -45,6 +46,17 @@ class IntakeRecord:
 
 class IntakeParseError(ValueError):
     """A record that cannot be converted safely. Never guessed past."""
+
+
+# Docket identity folding (see _identity_key). The structural prefix is
+# the leading year-plus-division block ("26ED"); everything after it is
+# the numeric sequence, where a letter can only be a lookalike.
+_DOCKET_PREFIX = re.compile(r"^\d{2}[a-z]{2}")
+# Prefix: division letters keep their identity, so d and t are exempt.
+_PREFIX_CONFUSABLES = str.maketrans("olisbzg", "0115826")
+# Sequence: every lookalike folds. q maps to 0 (the rounded-glyph
+# confusion in a numeric field); Q-for-9 is an accepted residual.
+_SEQUENCE_CONFUSABLES = str.maketrans("olisbzgqdt", "0115826001")
 
 
 def _parse_date(value: str | None, field_name: str, case_id: str) -> date | None:
@@ -281,25 +293,33 @@ class JsonFileCaseStore:
         # case-variant sibling ('26ED00101 ', '26ed00101') contests the
         # identity instead of leaving its stale twin sweeping alone.
         def _identity_key(case_id: str) -> str:
-            # Collapse ALL whitespace (interior-space variants are the same
-            # visual identity) and fold the classic ASCII confusable pairs
-            # (capital O for zero, lowercase l / uppercase I for one): a
-            # hand-keyed '26EDO0101' beside '26ED00101' is a transposition
-            # of ONE docket, and both rows must be contested, never swept
-            # as two urgent cases holding two capacity slots. Dedup contest
-            # only; stored ids are never rewritten.
-            # The letter-for-digit lookalike class, decided ONCE rather
-            # than one pair per review round (O/0, then S/5, then G/6 each
-            # reproduced the same capacity-displacement defect). RULE for
-            # membership: fold a lookalike letter unless it appears in the
-            # jurisdiction's STRUCTURAL docket prefix, where folding would
-            # collapse legitimately distinct divisions. Georgia
-            # dispossessory ids read like 26ED00101, so d and t stay
-            # unfolded (a folded d would merge the ED division with a
-            # hypothetical EO one); o, l, i, s, b, z, g, q carry no
-            # structural role in that format.
-            confusables = str.maketrans("olisbzgq", "01158269")
-            return "".join(case_id.split()).casefold().translate(confusables)
+            # One visual identity, one key. Two channels each produced two
+            # sweeping identities for a SINGLE docket, and each displaced a
+            # genuinely distinct urgent case out of attorney capacity under
+            # a green run:
+            #
+            #   SEPARATORS: '26ED-00101' beside '26ED00101' (the summons
+            #   prints the hyphen, the staff entry drops it). Every
+            #   non-alphanumeric is stripped now, not just whitespace.
+            #
+            #   LOOKALIKES: the letter-for-digit class, applied
+            #   POSITIONALLY. A letter keeps its identity only where the
+            #   format gives it structural meaning, which is the
+            #   year-plus-division prefix (folding d there would merge
+            #   division ED with EO). In the numeric SEQUENCE no letter has
+            #   structural meaning, so the full class folds there: applying
+            #   the prefix exemption to the WHOLE id left D-for-0, T-for-1
+            #   and Q-for-0 sequence twins uncontested.
+            #
+            # Contest only: stored ids are never rewritten, and a false
+            # contest fails safe as a loud refusal on a red run, which is
+            # the posture the rest of this loader takes.
+            squashed = "".join(ch for ch in case_id if ch.isalnum()).casefold()
+            match = _DOCKET_PREFIX.match(squashed)
+            cut = match.end() if match else 0
+            return squashed[:cut].translate(_PREFIX_CONFUSABLES) + squashed[cut:].translate(
+                _SEQUENCE_CONFUSABLES
+            )
 
         counts: dict[str, int] = {}
         first_seen: dict[str, str] = {}
