@@ -75,20 +75,22 @@ def _load_records(ctx: RunContext) -> None:
 def _apply_attorney_decision(ctx: RunContext, tools: dict[str, Any], response: str) -> None:
     """Execute the attorney's decision through the same commit tool the
     writer agent calls: one code path for store writes, partial-failure
-    handling, and audit events."""
-    if response.strip().lower().startswith("approve"):
-        ctx.attorney_action = "approved"
-        tools["commit_escalations"]()
-    else:
-        ctx.attorney_action = "deferred"
-        ctx.audit.append(
-            AuditEvent(
-                kind="attorney_decision",
-                case_id=None,
-                payload={"action": "deferred", "detail": response},
-                run_id=ctx.run_id,
-            )
+    handling, and audit events. Parsing is the same strict fail-closed
+    parse the approval hook uses."""
+    from agent.hooks import parse_attorney_response
+
+    action, reason = parse_attorney_response(response)
+    ctx.attorney_action = action
+    ctx.audit.append(
+        AuditEvent(
+            kind="attorney_decision",
+            case_id=None,
+            payload={"action": action, "detail": response.strip()[:400], "reason": reason},
+            run_id=ctx.run_id,
         )
+    )
+    if action == "approved":
+        tools["commit_escalations"]()
 
 
 def _deterministic_floor(ctx: RunContext, tools: dict[str, Any], attorney_response: str) -> None:
@@ -124,15 +126,17 @@ def run_deterministic(ctx: RunContext, attorney_response: str = "approve") -> Ru
 
 def run_live(
     ctx: RunContext,
-    attorney_response: str = "approve",
+    attorney_response: str,
     plugins: list[Any] | None = None,
 ) -> RunReport:
     """Full graph run with the attorney interrupt resumed in-session.
 
-    The multi-day persist-and-reinvoke wait ships with the Phase C
-    infrastructure; here the attorney's response arrives as an argument
-    (the console supplies it interactively in the deployed product).
-    ``plugins`` passes through to the graph for the evals chaos harness.
+    ``attorney_response`` is deliberately required, never defaulted: a live
+    path that auto-approves its own human interrupt is not human-in-the-
+    loop. The caller supplies the human's actual response (the console in
+    the deployed product; an explicit flag in the demo harness), and the
+    multi-day persist-and-reinvoke wait ships with the Phase C
+    infrastructure. ``plugins`` passes through for the evals chaos harness.
     """
     from strands.multiagent import Status
     from strands.types.interrupt import InterruptResponseContent
@@ -267,10 +271,22 @@ def main() -> None:
     parser.add_argument("--mode", choices=["live", "deterministic"], default="live")
     parser.add_argument(
         "--attorney-response",
-        default="approve",
-        help="'approve' or 'defer: <reason>' (demo short-path)",
+        default=None,
+        help=(
+            "the attorney's exact response: 'approve' or 'defer: <reason>'. "
+            "REQUIRED in live mode (a live run never auto-approves its own "
+            "interrupt); deterministic mode defaults to 'approve' as a CI "
+            "harness convenience."
+        ),
     )
     args = parser.parse_args()
+    if args.mode == "live" and args.attorney_response is None:
+        parser.error(
+            "--attorney-response is required in live mode: the human's "
+            "response is an input, never a default"
+        )
+    if args.attorney_response is None:
+        args.attorney_response = "approve"
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -351,6 +351,70 @@ def test_floor_makes_no_attorney_decision_without_candidates(tmp_path: Path) -> 
     assert "queue_ranked" in audit_kinds(ctx)
 
 
+# --- Attorney response parsing must be strict and fail closed -----------------
+
+
+def test_attorney_response_parsing_is_strict_and_fail_closed() -> None:
+    from agent.hooks import parse_attorney_response
+
+    approvals = ["approve", "Approve", "APPROVED!!", "approve all", " approved. "]
+    for probe in approvals:
+        action, _ = parse_attorney_response(probe)
+        assert action == "approved", probe
+
+    deferrals = [
+        "",  # empty defers
+        "approving is denied",  # prefix-match trap
+        "Approve only 26ED00101, defer the rest",  # conditional never flattens
+        "approve please",  # qualifier defers
+        "defer: in hearings",
+        "aprove",  # typo defers
+        "yes",  # ambiguity defers
+    ]
+    for probe in deferrals:
+        action, _ = parse_attorney_response(probe)
+        assert action == "deferred", probe
+
+
+def test_refusals_are_audited(tmp_path: Path) -> None:
+    """Every safety-boundary refusal leaves an audit event: disposition
+    mismatch, memo advice rejection, and commit refusals."""
+    ctx = make_ctx(tmp_path, [good_record("A-1", service_date="2026-08-30")], capacity=1)
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    interrupt_id = ctx.interrupt_candidates[0].case_id
+
+    tools["commit_escalations"]()  # missing rationale -> refused
+    tools["submit_escalation_rationale"](
+        case_id=interrupt_id,
+        disposition="monitor",  # ladder said interrupt -> mismatch
+        contributing_factors=["overdue"],
+        rationale="Deadline already passed.",
+        confidence=0.9,
+    )
+    tools["submit_escalation_rationale"](
+        case_id=interrupt_id,
+        disposition="interrupt",
+        contributing_factors=["overdue"],
+        rationale="Deadline already passed; no answer on file.",
+        confidence=0.9,
+    )
+    ctx.attorney_action = "approved"
+    tools["commit_escalations"]()
+    tools["commit_escalations"]()  # second call -> already committed
+    tools["write_packet_memo"](
+        case_id=interrupt_id, memo="The tenant should raise the defense of tender."
+    )
+
+    kinds = audit_kinds(ctx)
+    assert kinds.count("commit_refused") == 2
+    assert "rationale_rejected" in kinds
+    assert "memo_rejected" in kinds
+    events = ctx.audit.read_all()  # type: ignore[attr-defined]
+    reasons = {e["payload"].get("reason") for e in events if e["kind"] == "commit_refused"}
+    assert reasons == {"missing_rationales", "already_committed"}
+
+
 # --- A raising graph must not skip the floor ----------------------------------
 
 

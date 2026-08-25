@@ -259,6 +259,20 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
             )
             return _dump_validation_error(exc)
         if parsed.disposition != decision.level.value:
+            # A model attempting to relabel a ladder decision is exactly the
+            # behavior the audit story must preserve.
+            ctx.audit.append(
+                AuditEvent(
+                    kind="rationale_rejected",
+                    case_id=case_id,
+                    payload={
+                        "reason": "disposition_mismatch",
+                        "ladder": decision.level.value,
+                        "submitted": str(parsed.disposition)[:60],
+                    },
+                    run_id=ctx.run_id,
+                )
+            )
             return (
                 f"DISPOSITION MISMATCH: the ladder decided "
                 f"{decision.level.value!r} for {case_id}; the rationale must "
@@ -285,6 +299,14 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         """
         missing = [d.case_id for d in ctx.interrupt_candidates if d.case_id not in ctx.rationales]
         if missing:
+            ctx.audit.append(
+                AuditEvent(
+                    kind="commit_refused",
+                    case_id=None,
+                    payload={"reason": "missing_rationales", "cases": missing},
+                    run_id=ctx.run_id,
+                )
+            )
             return "MISSING RATIONALES: submit_escalation_rationale first for: " + ", ".join(
                 missing
             )
@@ -294,6 +316,14 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         already = list(ctx.committed_case_ids)
         to_write = [d for d in ctx.interrupt_candidates if d.case_id not in already]
         if not to_write:
+            ctx.audit.append(
+                AuditEvent(
+                    kind="commit_refused",
+                    case_id=None,
+                    payload={"reason": "already_committed", "cases": already},
+                    run_id=ctx.run_id,
+                )
+            )
             return (
                 "ALREADY COMMITTED: every interrupt-now escalation is already "
                 "durably recorded this run; do not call commit_escalations again."
@@ -376,6 +406,16 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         try:
             _reject_advice_language(memo, "memo")
         except ValueError as exc:
+            # A drafter drifting into advice language is a UPL-boundary
+            # event; it must be diagnosable from the audit trail alone.
+            ctx.audit.append(
+                AuditEvent(
+                    kind="memo_rejected",
+                    case_id=case_id,
+                    payload={"reason": str(exc)[:300]},
+                    run_id=ctx.run_id,
+                )
+            )
             return f"VALIDATION FAILED: {exc}"
         ctx.packet_memos[case_id] = memo
         ctx.audit.append(

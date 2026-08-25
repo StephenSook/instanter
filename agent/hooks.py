@@ -18,6 +18,27 @@ from agent.run_context import RunContext
 _GATED_TOOL = "commit_escalations"
 
 
+def parse_attorney_response(response: object) -> tuple[str, str]:
+    """Strict, fail-closed parse of an attorney response.
+
+    Returns (action, reason) where action is "approved" or "deferred".
+    Only an EXACT approval approves: qualifiers, typos, and anything
+    ambiguous defer, because a conditional approval flattened into blanket
+    approval is a UPL-grade audit failure while an over-deferral only
+    delays review.
+    """
+    detail = str(response).strip()
+    normalized = detail.lower().rstrip(".!")
+    if normalized in ("approve", "approved", "approve all"):
+        return "approved", "exact approval"
+    if normalized.startswith("defer"):
+        return "deferred", "explicit deferral"
+    return (
+        "deferred",
+        "response was not an exact approval; treated as deferral (fail closed)",
+    )
+
+
 class AttorneyApprovalHook(HookProvider):
     """Pause before committing escalations; a human decides."""
 
@@ -55,27 +76,21 @@ class AttorneyApprovalHook(HookProvider):
                 "run_id": self._ctx.run_id,
             },
         )
-        decision = str(response).strip().lower()
-        if decision.startswith("approve"):
-            self._ctx.attorney_action = "approved"
-            self._ctx.audit.append(
-                AuditEvent(
-                    kind="attorney_decision",
-                    case_id=None,
-                    payload={"action": "approved"},
-                    run_id=self._ctx.run_id,
-                )
-            )
-            return
-        self._ctx.attorney_action = "deferred"
+        # The attorney's actual words are recorded verbatim on BOTH
+        # branches; the audit trail exists to preserve exactly this.
+        action, reason = parse_attorney_response(response)
+        detail = str(response).strip()
+        self._ctx.attorney_action = action
         self._ctx.audit.append(
             AuditEvent(
                 kind="attorney_decision",
                 case_id=None,
-                payload={"action": "deferred", "detail": str(response)},
+                payload={"action": action, "detail": detail[:400], "reason": reason},
                 run_id=self._ctx.run_id,
             )
         )
+        if action == "approved":
+            return
         event.cancel_tool = f"Attorney deferred the commit: {response}"
 
 
