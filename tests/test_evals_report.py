@@ -47,6 +47,22 @@ def test_report_is_well_formed() -> None:
     assert report["seed"] == "synthetic_intake.json"
 
 
+def test_report_covers_the_code_actually_in_this_tree() -> None:
+    """A stale report is a false green: the recorded run must have covered
+    the agent layer, engine, harness, and seed exactly as they exist in
+    this tree. Any covered change requires regenerating the live evals
+    (`uv run python -m evals.run_evals` with AWS credentials) and
+    committing the new report alongside the change."""
+    from evals.run_evals import compute_inputs_digest
+
+    report = load_report()
+    assert report["inputs_digest"] == compute_inputs_digest(), (
+        "evals/results/latest.json was generated against different code, "
+        "seed, or harness contents than this tree; re-run the live evals "
+        "and commit the regenerated report with your change"
+    )
+
+
 def test_every_scenario_present() -> None:
     report = load_report()
     assert {v["case"] for v in report["verdicts"]} == SCENARIO_NAMES
