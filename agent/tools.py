@@ -114,6 +114,20 @@ def _rejection_payload(exc: ValidationError) -> dict[str, Any]:
 def build_tools(ctx: RunContext) -> dict[str, Any]:
     """Build the tool set closed over one run's context."""
 
+    def _audit_tool_refusal(tool: str, case_id: str, reason: str) -> None:
+        # Identity refusals (unknown case, not committed, duplicate memo)
+        # must be diagnosable from the audit trail alone: a hallucinated
+        # case id otherwise leaves no trace beyond the ABSENCE of a
+        # recorded event.
+        ctx.audit.append(
+            AuditEvent(
+                kind="tool_refused",
+                case_id=case_id,
+                payload={"tool": tool, "reason": reason},
+                run_id=ctx.run_id,
+            )
+        )
+
     @tool
     def list_cases_with_notes() -> str:
         """List every intake case that has free-text notes to read.
@@ -150,6 +164,7 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         conflicting. confidence is between 0 and 1.
         """
         if case_id not in ctx.records:
+            _audit_tool_refusal("submit_case_observations", case_id, "unknown_case")
             return f"UNKNOWN CASE: {case_id!r} is not in this run's intake."
         try:
             parsed = ExtractedObservations(
@@ -347,8 +362,10 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         """
         decision = ctx.decision_for(case_id)
         if decision is None:
+            _audit_tool_refusal("submit_escalation_rationale", case_id, "unknown_case")
             return f"UNKNOWN CASE: {case_id!r} is not in the ranked queue."
         if not decision.interrupt_now:
+            _audit_tool_refusal("submit_escalation_rationale", case_id, "not_interrupt_case")
             return (
                 f"NOT AN INTERRUPT CASE: {case_id} is {decision.level.value} "
                 "this run; rationales are only written for interrupt-now cases."
@@ -548,6 +565,30 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         # silently disappears), so the comparison is against what the
         # ORIGINAL invocation promised, not against what happens to be on
         # disk.
+        # Invariant guard (defense in depth behind the loader's duplicate
+        # refusal): a case the run REFUSED can never also be committed. A
+        # contested identity must reach the attorney as a refusal, not as a
+        # durable escalation written from the surviving row's data.
+        refused_candidates = sorted(
+            d.case_id for d in ctx.interrupt_candidates if d.case_id in ctx.refused_cases
+        )
+        if refused_candidates:
+            ctx.audit.append(
+                AuditEvent(
+                    kind="commit_refused",
+                    case_id=None,
+                    payload={
+                        "reason": "refused_case_in_candidates",
+                        "cases": refused_candidates,
+                    },
+                    run_id=ctx.run_id,
+                )
+            )
+            return (
+                f"REFUSED CASE IN QUEUE: {', '.join(refused_candidates)} carry "
+                "case-level refusals this run and cannot be committed; staff "
+                "must resolve the refusals first. Nothing was committed."
+            )
         own_manifest = RunManifest(
             run_id=ctx.run_id,
             inputs_digest=ctx.inputs_digest,
@@ -751,8 +792,10 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         nothing to add.
         """
         if case_id not in ctx.committed_case_ids:
+            _audit_tool_refusal("write_packet_memo", case_id, "not_committed")
             return f"NOT COMMITTED: {case_id!r} has no committed escalation this run."
         if case_id in ctx.packet_memos:
+            _audit_tool_refusal("write_packet_memo", case_id, "already_recorded")
             return f"ALREADY RECORDED: {case_id} has a packet memo this run; do not submit another."
         from agent.models import _reject_advice_language  # runtime boundary, same floor
 

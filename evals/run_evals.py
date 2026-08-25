@@ -328,7 +328,9 @@ def _run_graph_case(
             questions_segment = memo.split("Open questions recorded at intake analysis:", 1)[
                 1
             ].split("Staff verify the intake facts", 1)[0]
-        model_sections_clean = not any(ch.isdigit() for ch in notes_tail + questions_segment)
+        model_sections_clean = not any(
+            ch.isdigit() or ch.isnumeric() for ch in notes_tail + questions_segment
+        )
         return anchored and ambiguities_present and model_sections_clean
 
     memos_grounded = all(_memo_grounded(cid, memo) for cid, memo in memos_by_case.items())

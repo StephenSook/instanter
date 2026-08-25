@@ -231,8 +231,10 @@ def _pending_commit(ctx: RunContext, tools: dict[str, Any]) -> None:
                 payload={
                     "cases": [d.case_id for d in ctx.interrupt_candidates],
                     "reason": (
-                        "committed for attorney review without a realtime "
-                        "approval; no human was presented this queue"
+                        "committing the sweep for attorney review without a "
+                        "realtime approval (no human was presented this "
+                        "queue); the commit events that follow record the "
+                        "outcome"
                     ),
                 },
                 run_id=ctx.run_id,

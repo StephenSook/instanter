@@ -283,3 +283,23 @@ def test_advice_floor_rejects_partial_separator_imperatives() -> None:
                 rationale=poisoned,
                 confidence=0.9,
             )
+
+
+def test_numeric_floor_rejects_nonascii_numerals_and_compounds() -> None:
+    """Round-15 reproducers (hunter): isdigit misses vulgar fractions and
+    Roman numeral characters, the digit gate ran pre-NFKC only, and joined
+    compounds and month abbreviations were absent from the wordlist."""
+    from agent.models import reject_model_numerics
+
+    for poisoned in (
+        "the deadline is in ½ a day",
+        "deadline in Ⅻ days",
+        "in twentyfive days the writ issues",
+        "by early Dec the matter closes",
+        "the fortieth day approaches",
+        "sixtytwo days remain",
+    ):
+        with pytest.raises(ValueError):
+            reject_model_numerics(poisoned, "notes")
+    # 'tenant' must never trip the compound segmentation (ten + ant).
+    assert reject_model_numerics("The tenant reports the notice arrived.", "notes")
