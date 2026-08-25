@@ -318,3 +318,34 @@ def test_recorded_ambiguities_reach_the_packet_memo(tmp_path: Path) -> None:
     tools["commit_escalations"]()
     tools["write_packet_memo"](case_id=interrupt_id, notes="")
     assert "Which hearing date is correct?" in ctx.packet_memos[interrupt_id]
+
+
+def test_rationale_rejects_numbers_written_as_words(tmp_path: Path) -> None:
+    """Round-12 reproducer: 'nine hundred ninety nine days remaining'
+    passed the digit-only ban and stored a fabricated figure beside the
+    deterministic facts."""
+    ctx = make_ctx(tmp_path, [make_record(service_date="2026-09-01")], capacity=1)
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    interrupt_id = ctx.interrupt_candidates[0].case_id
+    worded = tools["submit_escalation_rationale"](
+        case_id=interrupt_id,
+        disposition="interrupt",
+        explanation=(
+            "The effective deadline is December thirty first two thousand "
+            "ninety nine, with nine hundred ninety nine days remaining and "
+            "queue rank nine."
+        ),
+        confidence=0.9,
+    )
+    assert "VALIDATION FAILED" in worded
+    assert interrupt_id not in ctx.rationales
+
+    empty_ok = tools["submit_escalation_rationale"](
+        case_id=interrupt_id,
+        disposition="interrupt",
+        explanation="",
+        confidence=0.9,
+    )
+    assert "recorded" in empty_ok
+    assert "Writer explanation:" not in ctx.rationales[interrupt_id].rationale

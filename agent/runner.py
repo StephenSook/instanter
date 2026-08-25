@@ -107,6 +107,7 @@ def _load_records(ctx: RunContext) -> None:
             default=str,
         ).encode()
     ).hexdigest()
+    ctx.inputs_digest = inputs_digest
     ctx.audit.append(
         AuditEvent(
             kind="run_started",
