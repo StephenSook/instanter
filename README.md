@@ -20,11 +20,15 @@ Coming with the build: architecture diagram, deployment guide, and a full statut
 
 ```
 engine/    deterministic deadline engine: jurisdiction rule table, 2026 holiday calendars, day-count logic
-tests/     statutory test corpus for the engine
+agent/     the triage agent: typed tools, the attorney-approval interrupt, the ladder, the audit trail
+evals/     live evaluation harness plus the recorded run CI gates on
+seed/      synthetic intake, labelled EXAMPLE DATA in every record
+tests/     statutory test corpus for the engine, plus the agent's chaos and contract suites
+docs/      architecture decision records
 scripts/   CI gates (AI-tone, secret scanning wrappers)
 ```
 
-Further directories (agent, bff, infra, console, mobile, seed, docs) land as their phases ship.
+Further directories (bff, infra, console, mobile) land as their phases ship.
 
 ## Development
 
