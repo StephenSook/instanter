@@ -216,9 +216,18 @@ class JsonFileCaseStore:
             raise IntakeParseError("intake 'records' must be a JSON array")
         records: list[IntakeRecord] = []
         malformed: list[MalformedIntakeRow] = []
+        # Real case ids carried by MALFORMED rows participate in duplicate
+        # detection too: a staff correction that fails the schema must not
+        # leave its stale sibling sweeping as the sole identity (previously
+        # the stale row committed durably while the correction was refused,
+        # under the loader's own every-row-refused promise).
+        malformed_real_ids: list[str] = []
         for index, row in enumerate(rows, start=1):
             row_key = f"intake-row-{index}"
-            if isinstance(row, dict) and type(row.get("case_id")) is str and row["case_id"]:
+            has_real_id = (
+                isinstance(row, dict) and type(row.get("case_id")) is str and bool(row["case_id"])
+            )
+            if has_real_id:
                 row_key = row["case_id"]
             if not isinstance(row, dict):
                 malformed.append(
@@ -236,6 +245,8 @@ class JsonFileCaseStore:
                         f"intake row {index} does not match the intake schema: {str(exc)[:200]}",
                     )
                 )
+                if has_real_id:
+                    malformed_real_ids.append(row_key)
                 continue
             if type(record.case_id) is not str or not record.case_id:
                 # A non-string case_id (a list, a number) constructs fine on
@@ -250,11 +261,11 @@ class JsonFileCaseStore:
                 continue
             records.append(record)
         # Duplicate ids: identity is ambiguous for EVERY row carrying the
-        # id, so all of them are refused and none is swept; the rest of the
-        # intake still processes.
+        # id, constructible or not, so all of them are refused and none is
+        # swept; the rest of the intake still processes.
         counts: dict[str, int] = {}
-        for record in records:
-            counts[record.case_id] = counts.get(record.case_id, 0) + 1
+        for case_id in [r.case_id for r in records] + malformed_real_ids:
+            counts[case_id] = counts.get(case_id, 0) + 1
         duplicated = {case_id for case_id, count in counts.items() if count > 1}
         if duplicated:
             for case_id in sorted(duplicated):

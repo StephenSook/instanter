@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-08-25T00:53:34.214136-04:00",
-  "git_sha": "06dea7761584d1373426f2846d8e5c05bb13260c",
-  "inputs_digest": "1c793e8d465c14043e443768cb85be5f3dcc613b2537e8f20993786d8e5cf7d6",
+  "generated_at": "2026-08-25T01:24:00.159537-04:00",
+  "git_sha": "5fd3b8e951944067d22d5d5890e30a1958c9e89c",
+  "inputs_digest": "ff600f6d209086c5a5f7ea1a479c833acf8cc01e8dab3a40d84a3eae7959cb3b",
   "seed": "synthetic_intake.json",
   "run_date": "2026-09-09",
   "llm_judges_included": true,
@@ -96,35 +96,35 @@
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales provided in the output contain operative facts only and read clearly, meeting the criteria for a score of 1.0."
+      "reason": "The output matches the expected output and the rationales provided are factual and clear, meeting the criteria for a score of 1.0."
     },
     {
       "case": "defer-capacity-2",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales state operative facts only and read clearly, meeting the criteria for a score of 1.0."
+      "reason": "The rationales state operative facts clearly and do not contain legal advice or conclusions."
     },
     {
       "case": "approve-capacity-1",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationale states operative facts only (deadline date, days remaining, queue rank) and reads clearly. It does not contain any legal advice or conclusions."
+      "reason": "The output contains operative facts only and reads clearly. It does not contain any legal advice, legal conclusions, or bare urgency scores. The key fields match the expected output."
     },
     {
       "case": "approve-capacity-5",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales provided in the output contain only operative facts such as deadline dates, days remaining, service methods, and queue ranks. They do not include any legal advice, conclusions, or urgency scores in place of facts, which aligns perfectly with the rubric requirements."
+      "reason": "The 'rationales' section contains only operative facts and reads clearly, meeting the criteria for a score of 1.0. The additional details in the output do not affect the scoring based on the rubric provided."
     },
     {
       "case": "chaos-notes-timeout-approve-2",
       "evaluator": "chaos-degradation",
       "score": 1.0,
       "passed": true,
-      "reason": "degraded exactly: zero observations, full deterministic sweep, no case lost (succeeded=True, backstop_used=False)"
+      "reason": "degraded exactly: zero observations, full deterministic sweep, no case lost (succeeded=False, backstop_used=True)"
     }
   ],
   "passed": 17,

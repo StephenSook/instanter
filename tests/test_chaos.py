@@ -1782,3 +1782,94 @@ def test_padded_case_ids_are_refused_not_duplicated(tmp_path: Path) -> None:
     payload = json.loads(tools["get_ranked_queue"]())
     assert {row["case_id"] for row in payload["queue"]} == {"26ED00101"}
     assert len(payload["refused_cases"]) == 2
+
+
+# --- Round-15 reproducers (hunter pass) ---------------------------------------
+
+
+def test_malformed_duplicate_row_refuses_the_whole_identity(tmp_path: Path) -> None:
+    """Round-15 reproducer: a valid urgent row plus a same-id row that
+    fails the schema (a staff correction with a typo) previously left the
+    STALE row sweeping and durably committed while the correction was
+    refused: one docket both committed and refused in a single run."""
+    intake = _write_intake(
+        tmp_path,
+        [
+            {
+                "case_id": "26ED00500",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+            {
+                "case_id": "26ED00500",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-09-02",
+                "service_method": "personal",
+                "unexpected_field": True,  # the correction, with a typo
+            },
+            {
+                "case_id": "GOOD-1",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+        ],
+    )
+    store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
+    ctx = RunContext(
+        run_date=RUN_DATE,
+        attorney_capacity=2,
+        store=store,
+        audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+    )
+    report = run_deterministic(ctx)
+    assert report.committed == ("GOOD-1",)  # the contested identity never commits
+    assert "26ED00500" in report.refused
+    assert not report.succeeded
+    rows = [json.loads(line) for line in (tmp_path / "e.jsonl").read_text().splitlines()]
+    assert [r["case_id"] for r in rows] == ["GOOD-1"]
+
+
+def test_commit_refuses_candidates_carrying_refusals(tmp_path: Path) -> None:
+    """Defense in depth behind the loader: a case present in refused_cases
+    can never also be committed."""
+    ctx = make_ctx(tmp_path, [good_record("A-1", service_date="2026-08-30")], capacity=1)
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    decision = ctx.interrupt_candidates[0]
+    tools["submit_escalation_rationale"](
+        case_id="A-1",
+        disposition=decision.level.value,
+        explanation="Deadline has passed with no answer on file.",
+        confidence=0.9,
+    )
+    ctx.refused_cases["A-1"] = "identity contested in this test"
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, ("A-1",))
+    outcome = tools["commit_escalations"]()
+    assert "REFUSED CASE IN QUEUE" in outcome
+    assert ctx.committed_case_ids == ()
+
+
+def test_identity_refusals_are_audited(tmp_path: Path) -> None:
+    """Round-15 (hunter): hallucinated case ids previously left no audit
+    trace beyond the absence of a recorded event."""
+    ctx = make_ctx(tmp_path, [good_record("A-1", service_date="2026-08-30")], capacity=1)
+    tools = build_tools(ctx)
+    tools["submit_case_observations"](
+        case_id="GHOST-1",
+        summary="Notes mention a hearing.",
+        needs_human_confirmation=True,
+        confidence=0.8,
+    )
+    tools["get_ranked_queue"]()
+    tools["submit_escalation_rationale"](
+        case_id="GHOST-2",
+        disposition="interrupt",
+        explanation="Deadline has passed.",
+        confidence=0.9,
+    )
+    tools["write_packet_memo"](case_id="GHOST-3", notes="")
+    kinds = audit_kinds(ctx)
+    assert kinds.count("tool_refused") == 3
