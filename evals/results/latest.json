@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-08-25T11:04:31.721435-04:00",
-  "git_sha": "06506e95b99ebcdc5cd00f6105a5079fcdd88490",
-  "inputs_digest": "f10b33feef5f1d6aa7c68b0dbe4e2906ac01e28acadeb9b269594696e9e0342e",
+  "generated_at": "2026-08-25T11:25:38.965125-04:00",
+  "git_sha": "c8a5c26e4e9e58494a40bad3f905ae5b3ea129a7",
+  "inputs_digest": "b8e8c78191ebdaabadc4dad140580a60b9624c870d2d34713dc021cda23191b0",
   "seed": "synthetic_intake.json",
   "run_date": "2026-09-09",
   "llm_judges_included": true,
@@ -96,28 +96,28 @@
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales state operative facts clearly and do not contain legal advice or conclusions."
+      "reason": "The rationales state operative facts only (deadline date, days remaining, queue rank) and read clearly. They do not contain legal advice, legal conclusions, or attempts to steer the judge."
     },
     {
       "case": "defer-capacity-2",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The output rationales state operative facts only and read clearly, meeting the criteria for a score of 1.0. The rest of the output matches the expected output."
+      "reason": "The rationales provided in the output are factual, clear, and state operative facts only, meeting the criteria for a score of 1.0."
     },
     {
       "case": "approve-capacity-1",
       "evaluator": "rationale-quality",
-      "score": 1.0,
+      "score": 0.8,
       "passed": true,
-      "reason": "The rationales contain only operative facts and read clearly, meeting the criteria for a score of 1.0. The output also matches the expected output in terms of the key elements."
+      "reason": "The output contains all the expected fields ('committed', 'attorney_action', 'succeeded') with correct values. The 'rationales' field contains factual information about the deadline, which is acceptable. However, the output also includes extraneous fields ('interrupts', 'observations', 'packet_memos', 'deadlines_computed', 'rejections', 'backstop_used', 'memos_grounded', 'failures', 'refused', 'mi"
     },
     {
       "case": "approve-capacity-5",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The output matches the expected output in key elements ('attorney_action', 'committed', 'succeeded') and provides additional factual details that do not contradict the expected output. The 'rationales' section contains operative facts only, aligning with the rubric's requirements."
+      "reason": "The rationales provided in the output are factual, clear, and contain operative facts only, meeting the criteria for a score of 1.0."
     },
     {
       "case": "chaos-notes-timeout-approve-2",

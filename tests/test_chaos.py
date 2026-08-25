@@ -2453,3 +2453,58 @@ def test_real_seed_ids_never_self_contest(tmp_path: Path) -> None:
     records, malformed = _load_ids(tmp_path, [r["case_id"] for r in seed], "seed")
     assert len(records) == len(seed)
     assert malformed == ()
+
+
+# --- Round-22 reproducer ------------------------------------------------------
+
+
+# Every lookalike letter for each digit. The sweep below asserts the
+# identity rule at EVERY position of a docket id, because getting the
+# folded span wrong has now regressed in both directions: exempting the
+# whole prefix left sequence twins uncontested (round 21), and requiring
+# digits in the year left year twins uncontested (round 22).
+_LOOKALIKES = {"0": "oOQqD", "1": "lLiIT", "5": "sS", "8": "bB", "2": "zZ", "6": "gG"}
+_BASE_DOCKET = "26ED00101"
+
+
+def _positional_twins() -> list[tuple[str, str]]:
+    cases: list[tuple[str, str]] = []
+    for position, char in enumerate(_BASE_DOCKET):
+        if 2 <= position < 4:
+            continue  # the division: letters are structural there
+        for substitute in _LOOKALIKES.get(char, ""):
+            twin = _BASE_DOCKET[:position] + substitute + _BASE_DOCKET[position + 1 :]
+            if twin != _BASE_DOCKET:
+                cases.append((f"pos{position}-{substitute}", twin))
+    return cases
+
+
+@pytest.mark.parametrize(("label", "twin"), _positional_twins())
+def test_every_positional_lookalike_twin_contests(tmp_path: Path, label: str, twin: str) -> None:
+    records, malformed = _load_ids(tmp_path, [_BASE_DOCKET, twin], f"pos-{label}")
+    assert records == (), f"{twin} swept beside {_BASE_DOCKET} ({label})"
+    assert malformed
+
+
+@pytest.mark.parametrize("division", ["EO", "EV", "EM", "SC", "ET", "EB", "ES"])
+def test_division_letters_are_never_folded(tmp_path: Path, division: str) -> None:
+    """The division is the one zone where a letter is structural: 26ED and
+    26EO are different divisions, not a lookalike pair."""
+    other = f"26{division}00101"
+    records, malformed = _load_ids(tmp_path, [_BASE_DOCKET, other], f"div-{division}")
+    assert len(records) == 2
+    assert malformed == ()
+
+
+def test_realistic_docket_population_has_no_false_contests(tmp_path: Path) -> None:
+    """Three years by ten divisions by twenty-five sequences: no two real
+    dockets may collide under the fold."""
+    ids = [
+        f"{year}{division}{sequence:05d}"
+        for year in ("24", "25", "26")
+        for division in ("ED", "EO", "EV", "CV", "SC", "MC", "EM", "DP", "GC", "CC")
+        for sequence in range(101, 126)
+    ]
+    records, malformed = _load_ids(tmp_path, ids, "population")
+    assert len(records) == len(ids)
+    assert malformed == ()

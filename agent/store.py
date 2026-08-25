@@ -48,14 +48,20 @@ class IntakeParseError(ValueError):
     """A record that cannot be converted safely. Never guessed past."""
 
 
-# Docket identity folding (see _identity_key). The structural prefix is
-# the leading year-plus-division block ("26ED"); everything after it is
-# the numeric sequence, where a letter can only be a lookalike.
-_DOCKET_PREFIX = re.compile(r"^\d{2}[a-z]{2}")
-# Prefix: division letters keep their identity, so d and t are exempt.
-_PREFIX_CONFUSABLES = str.maketrans("olisbzg", "0115826")
-# Sequence: every lookalike folds. q maps to 0 (the rounded-glyph
-# confusion in a numeric field); Q-for-9 is an accepted residual.
+# Docket identity folding (see _identity_key). A Georgia dispossessory id
+# reads 26ED00101: a two-character YEAR, a two-letter DIVISION, then the
+# numeric SEQUENCE. Exactly one of those zones gives letters structural
+# meaning (the division), so exactly one exempts them from folding.
+#
+# The prefix pattern must TOLERATE lookalikes in the year, or a letter
+# there makes the whole match fail and sends the id down the sequence
+# branch, which destroys the division letters and leaves the twin unable
+# to rejoin its own docket. That regression cost nine year-position
+# channels and is why the character class below is not \d.
+_DOCKET_PREFIX = re.compile(r"^[0-9olisbzgq]{2}[a-z]{2}")
+# Year and sequence: every lookalike folds. q maps to 0 (the rounded
+# glyph in a numeric field); Q-for-9 is an accepted residual, as is
+# g-for-9, since a fold table gives each letter one target.
 _SEQUENCE_CONFUSABLES = str.maketrans("olisbzgqdt", "0115826001")
 
 
@@ -302,24 +308,24 @@ class JsonFileCaseStore:
             #   prints the hyphen, the staff entry drops it). Every
             #   non-alphanumeric is stripped now, not just whitespace.
             #
-            #   LOOKALIKES: the letter-for-digit class, applied
-            #   POSITIONALLY. A letter keeps its identity only where the
-            #   format gives it structural meaning, which is the
-            #   year-plus-division prefix (folding d there would merge
-            #   division ED with EO). In the numeric SEQUENCE no letter has
-            #   structural meaning, so the full class folds there: applying
-            #   the prefix exemption to the WHOLE id left D-for-0, T-for-1
-            #   and Q-for-0 sequence twins uncontested.
+            #   LOOKALIKES: the letter-for-digit class, folded everywhere
+            #   EXCEPT the two-letter division, the one zone where a
+            #   letter is structural (folding d there would merge division
+            #   ED with EO). Getting that span wrong has now cost two
+            #   rounds in opposite directions: exempting the whole prefix
+            #   left D-for-0, T-for-1 and Q-for-0 SEQUENCE twins
+            #   uncontested, and requiring digits in the year left nine
+            #   YEAR twins uncontested.
             #
             # Contest only: stored ids are never rewritten, and a false
             # contest fails safe as a loud refusal on a red run, which is
             # the posture the rest of this loader takes.
             squashed = "".join(ch for ch in case_id if ch.isalnum()).casefold()
-            match = _DOCKET_PREFIX.match(squashed)
-            cut = match.end() if match else 0
-            return squashed[:cut].translate(_PREFIX_CONFUSABLES) + squashed[cut:].translate(
-                _SEQUENCE_CONFUSABLES
-            )
+            if _DOCKET_PREFIX.match(squashed):
+                year = squashed[:2].translate(_SEQUENCE_CONFUSABLES)
+                division = squashed[2:4]  # structural: letters keep identity
+                return year + division + squashed[4:].translate(_SEQUENCE_CONFUSABLES)
+            return squashed.translate(_SEQUENCE_CONFUSABLES)
 
         counts: dict[str, int] = {}
         first_seen: dict[str, str] = {}
