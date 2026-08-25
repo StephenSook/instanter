@@ -47,10 +47,18 @@ class RunReport:
     # could not protect them, so they fail the run exactly like a lost
     # commit does. A scheduler must never see green over a dropped case.
     refused: tuple[str, ...] = ()
+    # Committed cases whose attorney packet lacks a cover memo: an
+    # incomplete packet is an incomplete run.
+    missing_memos: tuple[str, ...] = ()
 
     @property
     def succeeded(self) -> bool:
-        return not self.failures and not self.model_error and not self.refused
+        return (
+            not self.failures
+            and not self.model_error
+            and not self.refused
+            and not self.missing_memos
+        )
 
 
 def _load_records(ctx: RunContext) -> None:
@@ -105,11 +113,38 @@ def _apply_attorney_decision(ctx: RunContext, tools: dict[str, Any], response: s
         tools["commit_escalations"]()
 
 
+def _ensure_packet_memos(ctx: RunContext, tools: dict[str, Any]) -> None:
+    """Every committed escalation must carry an attorney-packet cover memo.
+    When the drafter never ran (floor or recovery paths) or shortchanged a
+    case, a clearly-labeled template memo of deterministic facts fills the
+    packet; the report's memo parity remains the final net."""
+    for case_id in ctx.committed_case_ids:
+        if case_id in ctx.packet_memos:
+            continue
+        decision = ctx.decision_for(case_id)
+        deadline = ctx.deadlines.get(case_id)
+        record = ctx.records.get(case_id)
+        parts = ["[MODEL DISABLED: template memo]"]
+        if deadline is not None and deadline.effective_deadline is not None:
+            parts.append(f"Effective deadline {deadline.effective_deadline}.")
+        if decision is not None:
+            parts.append(
+                f"{decision.days_remaining} day(s) remaining at the run date; "
+                f"queue rank {decision.rank}."
+            )
+        if record is not None:
+            parts.append(f"Service method recorded as {record.service_method}.")
+        if deadline is not None and deadline.flags:
+            parts.append("Flags: " + ", ".join(f.code.value for f in deadline.flags) + ".")
+        parts.append("Staff verify the intake facts against the tenant record.")
+        tools["write_packet_memo"](case_id=case_id, memo=" ".join(parts)[:1500])
+
+
 def _deterministic_floor(ctx: RunContext, tools: dict[str, Any], attorney_response: str) -> None:
     """The part of the sweep that must NEVER depend on model discretion:
     compute every deadline, rank the queue, put every interrupt-now case in
     front of the attorney (template rationale if the model never wrote one),
-    and execute the attorney's decision."""
+    execute the attorney's decision, and complete the attorney packet."""
     if not ctx.decisions:
         tools["get_ranked_queue"]()
     for decision in ctx.interrupt_candidates:
@@ -126,6 +161,7 @@ def _deterministic_floor(ctx: RunContext, tools: dict[str, Any], attorney_respon
         )
     if ctx.interrupt_candidates:
         _apply_attorney_decision(ctx, tools, attorney_response)
+        _ensure_packet_memos(ctx, tools)
 
 
 def run_deterministic(ctx: RunContext, attorney_response: str = "approve") -> RunReport:
@@ -199,6 +235,7 @@ def run_live(
     # is the catastrophic error, so if no attorney decision was recorded,
     # the runner itself completes the sweep deterministically, audited.
     backstop_used = False
+    tools: dict[str, Any] | None = None
     if not ctx.attorney_action:
         tools = build_tools(ctx)
         if ctx.interrupt_candidates or not ctx.decisions:
@@ -267,6 +304,13 @@ def run_live(
                 )
             tools["commit_escalations"]()
 
+    # Attorney-packet completeness: every committed case carries a memo,
+    # whichever path committed it (drafter, floor, or recovery).
+    if ctx.attorney_action == "approved" and ctx.committed_case_ids:
+        if tools is None:
+            tools = build_tools(ctx)
+        _ensure_packet_memos(ctx, tools)
+
     report = _report(ctx, mode="live", backstop_used=backstop_used, model_error=model_error)
     ctx.audit.append(
         AuditEvent(
@@ -315,6 +359,11 @@ def _report(
                 for case_id in ctx.approved_case_ids
                 if case_id not in ctx.committed_case_ids
             )
+    missing_memos: tuple[str, ...] = ()
+    if ctx.attorney_action == "approved":
+        missing_memos = tuple(
+            case_id for case_id in ctx.committed_case_ids if case_id not in ctx.packet_memos
+        )
     return RunReport(
         run_id=ctx.run_id,
         mode=mode,
@@ -327,6 +376,7 @@ def _report(
         model_error=model_error,
         failures=failures,
         refused=tuple(sorted(ctx.refused_cases)),
+        missing_memos=missing_memos,
     )
 
 
@@ -390,6 +440,7 @@ def main() -> None:
                 "model_error": report.model_error,
                 "failures": list(report.failures),
                 "refused": list(report.refused),
+                "missing_memos": list(report.missing_memos),
                 "succeeded": report.succeeded,
             },
             indent=2,
