@@ -174,8 +174,7 @@ def test_store_failure_mid_commit_is_loud_and_exact(tmp_path: Path) -> None:
         tools["submit_escalation_rationale"](
             case_id=decision.case_id,
             disposition=decision.level.value,
-            contributing_factors=list(decision.factors)[:8],
-            rationale="Deadline has passed with no answer on file.",
+            explanation="Deadline has passed with no answer on file.",
             confidence=0.9,
         )
     ctx.attorney_action = "approved"
@@ -244,8 +243,7 @@ def test_commit_retry_after_partial_failure_never_duplicates(tmp_path: Path) -> 
         tools["submit_escalation_rationale"](
             case_id=decision.case_id,
             disposition=decision.level.value,
-            contributing_factors=list(decision.factors)[:8],
-            rationale="Deadline has passed with no answer on file.",
+            explanation="Deadline has passed with no answer on file.",
             confidence=0.9,
         )
     ctx.attorney_action = "approved"
@@ -331,8 +329,7 @@ def test_floor_keeps_model_rationales_and_templates_only_missing(tmp_path: Path)
     tools["submit_escalation_rationale"](
         case_id=first.case_id,
         disposition=first.level.value,
-        contributing_factors=list(first.factors)[:8],
-        rationale="Deadline has passed with no answer on file.",
+        explanation="Deadline has passed with no answer on file.",
         confidence=0.9,
     )
 
@@ -393,15 +390,13 @@ def test_refusals_are_audited(tmp_path: Path) -> None:
     tools["submit_escalation_rationale"](
         case_id=interrupt_id,
         disposition="monitor",  # ladder said interrupt -> mismatch
-        contributing_factors=["overdue"],
-        rationale="Deadline already passed.",
+        explanation="Deadline already passed.",
         confidence=0.9,
     )
     tools["submit_escalation_rationale"](
         case_id=interrupt_id,
         disposition="interrupt",
-        contributing_factors=["overdue"],
-        rationale="Deadline already passed; no answer on file.",
+        explanation="Deadline already passed; no answer on file.",
         confidence=0.9,
     )
     ctx.attorney_action = "approved"
@@ -585,8 +580,7 @@ def test_ambiguous_store_failure_retry_never_duplicates(tmp_path: Path) -> None:
         tools["submit_escalation_rationale"](
             case_id=decision.case_id,
             disposition=decision.level.value,
-            contributing_factors=list(decision.factors)[:8],
-            rationale="Deadline has passed with no answer on file.",
+            explanation="Deadline has passed with no answer on file.",
             confidence=0.9,
         )
 
@@ -725,8 +719,7 @@ def test_commit_never_exceeds_the_approval_snapshot(tmp_path: Path) -> None:
         tools["submit_escalation_rationale"](
             case_id=decision.case_id,
             disposition=decision.level.value,
-            contributing_factors=list(decision.factors)[:8],
-            rationale="Deadline has passed with no answer on file.",
+            explanation="Deadline has passed with no answer on file.",
             confidence=0.9,
         )
     # The attorney approved ONLY A-1 (snapshot from an earlier queue state).
@@ -754,8 +747,7 @@ def test_stale_durable_content_is_a_conflict_not_a_success(tmp_path: Path) -> No
     tools["submit_escalation_rationale"](
         case_id=decision.case_id,
         disposition=decision.level.value,
-        contributing_factors=list(decision.factors)[:8],
-        rationale="Deadline has passed with no answer on file.",
+        explanation="Deadline has passed with no answer on file.",
         confidence=0.9,
     )
     # A stale writer already landed a same-key row with different content.
@@ -799,8 +791,7 @@ def test_candidate_outside_the_approval_fails_the_run(tmp_path: Path) -> None:
         tools["submit_escalation_rationale"](
             case_id=decision.case_id,
             disposition=decision.level.value,
-            contributing_factors=list(decision.factors)[:8],
-            rationale="Deadline has passed with no answer on file.",
+            explanation="Deadline has passed with no answer on file.",
             confidence=0.9,
         )
     ctx.attorney_action = "approved"
@@ -894,8 +885,7 @@ def test_approval_obligation_survives_a_later_deferral(tmp_path: Path) -> None:
     tools["submit_escalation_rationale"](
         case_id=decision.case_id,
         disposition=decision.level.value,
-        contributing_factors=list(decision.factors)[:8],
-        rationale="Deadline has passed with no answer on file.",
+        explanation="Deadline has passed with no answer on file.",
         confidence=0.9,
     )
     bind_approval(ctx, ("A-1",))  # the human approved...
@@ -946,8 +936,7 @@ def test_deferred_durable_row_does_not_satisfy_a_commit(tmp_path: Path) -> None:
     tools["submit_escalation_rationale"](
         case_id=decision.case_id,
         disposition=decision.level.value,
-        contributing_factors=list(decision.factors)[:8],
-        rationale="Deadline has passed with no answer on file.",
+        explanation="Deadline has passed with no answer on file.",
         confidence=0.9,
     )
     rationale = ctx.rationales["A-1"]
@@ -1041,8 +1030,7 @@ def test_later_deferral_never_hides_an_unapproved_candidate(tmp_path: Path) -> N
         tools["submit_escalation_rationale"](
             case_id=decision.case_id,
             disposition=decision.level.value,
-            contributing_factors=list(decision.factors)[:8],
-            rationale="Deadline has passed with no answer on file.",
+            explanation="Deadline has passed with no answer on file.",
             confidence=0.9,
         )
     ctx.attorney_action = "approved"
@@ -1287,8 +1275,7 @@ def test_invalidated_approval_is_an_outstanding_obligation(tmp_path: Path) -> No
     tools["submit_escalation_rationale"](
         case_id=decision.case_id,
         disposition=decision.level.value,
-        contributing_factors=list(decision.factors)[:8],
-        rationale="Deadline has passed with no answer on file.",
+        explanation="Deadline has passed with no answer on file.",
         confidence=0.9,
     )
 
@@ -1376,8 +1363,7 @@ def test_no_clock_interrupt_memo_states_missing_deadline(tmp_path: Path) -> None
     tools["submit_escalation_rationale"](
         case_id="NC-1",
         disposition=decision.level.value,
-        contributing_factors=list(decision.factors)[:8],
-        rationale="No reliable deadline exists; staff must resolve the intake facts today.",
+        explanation="No reliable deadline exists; staff must resolve the intake facts today.",
         confidence=0.9,
     )
     ctx.attorney_action = "approved"
@@ -1388,3 +1374,60 @@ def test_no_clock_interrupt_memo_states_missing_deadline(tmp_path: Path) -> None
     memo = ctx.packet_memos["NC-1"]
     assert "None day(s)" not in memo
     assert "No reliable deadline was established" in memo
+
+
+# --- Round-11 reproducer ------------------------------------------------------
+
+
+def test_stable_run_id_retry_over_mutated_intake_conflicts(tmp_path: Path) -> None:
+    """Round-11 reproducer: a retry reusing its invocation id after the
+    intake changed (A answer-filed, B newly urgent) merged both sweeps
+    under one run id and reported green. Durable rows outside the retry's
+    candidate set are a run-scope conflict that fails closed."""
+
+    def run_once(records: list[IntakeRecord]) -> tuple[RunContext, str]:
+        store = JsonFileCaseStore(
+            intake_path=tmp_path / "unused.json",
+            escalations_path=tmp_path / "escalations.jsonl",
+        )
+        ctx = RunContext(
+            run_date=RUN_DATE,
+            attorney_capacity=2,
+            store=store,
+            audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+            run_id="evt-mutated-1",
+        )
+        for record in records:
+            ctx.records[record.case_id] = record
+        tools = build_tools(ctx)
+        tools["get_ranked_queue"]()
+        for decision in ctx.interrupt_candidates:
+            tools["submit_escalation_rationale"](
+                case_id=decision.case_id,
+                disposition=decision.level.value,
+                explanation="Deadline has passed with no answer on file.",
+                confidence=0.9,
+            )
+        ctx.attorney_action = "approved"
+        bind_approval(ctx, tuple(d.case_id for d in ctx.interrupt_candidates))
+        result = tools["commit_escalations"]()
+        return ctx, result
+
+    first_ctx, _first_result = run_once([good_record("A-1", service_date="2026-08-30")])
+    assert first_ctx.committed_case_ids == ("A-1",)
+
+    mutated = [
+        IntakeRecord(
+            case_id="A-1",
+            jurisdiction_id="GA-FULTON",
+            service_date="2026-08-30",
+            service_method="personal",
+            answer_filed=True,  # A resolved between attempts
+        ),
+        good_record("B-2", service_date="2026-08-31"),  # B newly urgent
+    ]
+    second_ctx, second_result = run_once(mutated)
+    assert "STORE CONFLICT" in second_result
+    assert second_ctx.committed_case_ids == ()
+    rows = [json.loads(line) for line in (tmp_path / "escalations.jsonl").read_text().splitlines()]
+    assert [r["case_id"] for r in rows] == ["A-1"]  # nothing merged in

@@ -30,6 +30,27 @@ from engine.deadline import compute_deadline
 from engine.rules import RULES
 
 
+def rationale_facts(ctx: RunContext, case_id: str) -> str:
+    """Deterministic numeric core of an escalation rationale: the date, the
+    day count, and the rank always come from engine state (a writer model
+    fabricated all three in a probe; the model now contributes only a
+    digitless explanation appended after these facts)."""
+    decision = ctx.decision_for(case_id)
+    deadline = ctx.deadlines.get(case_id)
+    bits: list[str] = []
+    if deadline is not None and deadline.effective_deadline is not None:
+        bits.append(f"Effective deadline {deadline.effective_deadline}.")
+    if decision is not None:
+        if decision.days_remaining is not None:
+            bits.append(
+                f"{decision.days_remaining} day(s) remaining at the run date "
+                f"{ctx.run_date.isoformat()}; queue rank {decision.rank}."
+            )
+        else:
+            bits.append(f"No reliable deadline was established; queue rank {decision.rank}.")
+    return " ".join(bits)
+
+
 def packet_facts(ctx: RunContext, case_id: str) -> str:
     """Deterministic attorney-packet fact sheet: every number and date in a
     memo comes from engine state, never from a model. (A drafter with no
@@ -58,6 +79,15 @@ def packet_facts(ctx: RunContext, case_id: str) -> str:
         parts.append(f"Service method recorded as {record.service_method}.")
     if deadline is not None and deadline.flags:
         parts.append("Flags: " + ", ".join(f.code.value for f in deadline.flags) + ".")
+    # Recorded intake-analysis ambiguities are packet facts too: silently
+    # dropping them loses exactly the open questions the attorney must
+    # resolve (round 11: two cases' recorded ambiguities never reached
+    # their memos while the run scored 17/17).
+    observation = ctx.observations.get(case_id)
+    if observation is not None and observation.ambiguities:
+        parts.append(
+            "Open questions recorded at intake analysis: " + " ".join(observation.ambiguities)
+        )
     parts.append("Staff verify the intake facts against the tenant record.")
     return " ".join(parts)
 
@@ -297,18 +327,17 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
     def submit_escalation_rationale(
         case_id: str,
         disposition: str,
-        contributing_factors: list[str],
-        rationale: str,
+        explanation: str,
         confidence: float,
     ) -> str:
         """Submit the escalation rationale for ONE interrupt-now case.
 
         disposition must echo the ladder's level for this case exactly
-        (e.g. 'interrupt'); contributing_factors restates the ladder's
-        deterministic factors as plain strings; rationale is a short
-        factual explanation (deadline date, days remaining, flags, queue
-        position) with no advice; confidence is between 0 and 1. Facts
-        only; the ladder decided, you explain.
+        (e.g. 'interrupt'). explanation is a short DIGITLESS narrative of
+        why this case outranks the others, in plain factual language with
+        no advice: every date, day count, and rank is rendered
+        deterministically by the system, so name the facts, never figures.
+        confidence is between 0 and 1. The ladder decided, you explain.
         """
         decision = ctx.decision_for(case_id)
         if decision is None:
@@ -318,12 +347,41 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 f"NOT AN INTERRUPT CASE: {case_id} is {decision.level.value} "
                 "this run; rationales are only written for interrupt-now cases."
             )
+        if any(ch.isdigit() for ch in explanation):
+            # The attorney-facing numbers all come from engine state; a
+            # model-authored figure beside them is exactly the fabrication
+            # the round-9 memo fix closed, resurfacing one field over. The
+            # error text states the exact way out (rephrase, or submit an
+            # empty explanation): a live writer retries on error text, and
+            # a rejection with no stated recovery starves the whole sweep
+            # into the floor (observed live: ten straight rejections, zero
+            # commits, backstop delivery).
+            ctx.audit.append(
+                AuditEvent(
+                    kind="rationale_rejected",
+                    case_id=case_id,
+                    payload={"reason": "numeric_explanation"},
+                    run_id=ctx.run_id,
+                )
+            )
+            return (
+                "VALIDATION FAILED: explanation must contain no digits; "
+                "every date, day count, and rank is rendered by the system. "
+                "Resubmit with the numbers written out as words or removed, "
+                "or resubmit with explanation set to the empty string to "
+                "record the deterministic facts alone."
+            )
+        body = f"{rationale_facts(ctx, case_id)} Writer explanation: {explanation.strip()}"
+        if not explanation.strip():
+            # An empty explanation is a legitimate submission: the
+            # deterministic facts stand alone.
+            body = rationale_facts(ctx, case_id)
         try:
             parsed = EscalationRationale(
                 case_id=case_id,
                 disposition=disposition,
-                contributing_factors=contributing_factors,
-                rationale=rationale,
+                contributing_factors=list(decision.factors)[:8],
+                rationale=body[:900],
                 confidence=confidence,
             )
         except ValidationError as exc:
@@ -476,6 +534,37 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
             )
 
         stored = {e.case_id: e for e in ctx.store.list_escalations(run_id=ctx.run_id)}
+        # Run-scope integrity: a stable invocation id promises the SAME
+        # inputs. Durable rows under this run id for cases outside the
+        # current interrupt set mean the retry's sweep diverged from the
+        # original invocation (intake changed between attempts); merging
+        # the two under one id would hide a stale escalation behind a green
+        # retry. Fail closed before any write.
+        candidate_ids = {d.case_id for d in ctx.interrupt_candidates}
+        foreign = sorted(cid for cid in stored if cid not in candidate_ids)
+        if foreign:
+            ctx.audit.append(
+                AuditEvent(
+                    kind="store_conflict",
+                    case_id=None,
+                    payload={
+                        "reason": (
+                            "durable escalations exist for this run id on "
+                            "cases outside the current interrupt set; the "
+                            "retry's inputs do not match the original "
+                            "invocation"
+                        ),
+                        "cases": foreign,
+                    },
+                    run_id=ctx.run_id,
+                )
+            )
+            return (
+                f"STORE CONFLICT: durable escalations for this run id cover "
+                f"{', '.join(foreign)}, which are not in the current queue; "
+                "the retry does not match the original invocation's inputs. "
+                "Nothing was committed; staff must reconcile the store."
+            )
         already: list[str] = []
         conflicts: list[str] = []
         to_write = []
@@ -647,7 +736,8 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 return f"VALIDATION FAILED: {exc}"
         memo = packet_facts(ctx, case_id)
         if notes:
-            memo = f"{memo} Reviewer notes: {notes.strip()}"[:1500]
+            memo = f"{memo} Reviewer notes: {notes.strip()}"
+        memo = memo[:1500]
         ctx.packet_memos[case_id] = memo
         ctx.audit.append(
             AuditEvent(

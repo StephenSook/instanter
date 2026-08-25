@@ -177,14 +177,15 @@ def _strip_marks(text: str) -> str:
     )
 
 
-# Single alphanumerics separated by short runs of ANY non-alphanumeric
-# characters, punctuation and whitespace mixed ("f.i.l.e", "f. i. l. e",
-# "F.-1-l-e"): collapse the run by dropping the separators. Every single
-# character in the run must be standalone (not a word prefix), so factual
-# prose like "0 day(s) away; rank 1 of 2" is never absorbed. Matching
-# shadow only.
+# Single alphanumerics separated by runs of ANY non-alphanumeric
+# characters, arbitrary length, punctuation and whitespace mixed
+# ("f.i.l.e", "f. i. l. e", "F.-1-l-e", "F....i....l....e"): collapse the
+# run by dropping the separators. A finite separator cap is a bypass with
+# one more dot, so the length is unbounded; every single character in the
+# run must be standalone (not a word prefix), so factual prose like
+# "0 day(s) away; rank 1 of 2" is never absorbed. Matching shadow only.
 _SEPARATED_RUN = re.compile(
-    r"(?<![0-9a-z])[0-9a-z](?![0-9a-z])(?:[^0-9a-z]{1,3}[0-9a-z](?![0-9a-z])){2,}"
+    r"(?<![0-9a-z])[0-9a-z](?![0-9a-z])(?:[^0-9a-z]+[0-9a-z](?![0-9a-z])){2,}"
 )
 
 
