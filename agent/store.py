@@ -84,6 +84,13 @@ def validate_intake_types(record: IntakeRecord) -> None:
         raise IntakeParseError(
             f"case {record.case_id!r}: case_id must contain only printable characters"
         )
+    # Whitespace padding creates visually duplicate docket identities
+    # ('26ED00101' vs '26ED00101 ') that dodge duplicate detection, hold
+    # separate capacity slots, and confuse every downstream key.
+    if record.case_id != record.case_id.strip():
+        raise IntakeParseError(
+            f"case {record.case_id!r}: case_id must not begin or end with whitespace"
+        )
     for name in ("answer_filed", "amended_affidavit"):
         if type(getattr(record, name)) is not bool:
             raise IntakeParseError(

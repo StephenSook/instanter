@@ -43,14 +43,39 @@ class JsonlAuditSink:
         # lock, with the next seq derived from the file itself at append
         # time: two sinks (or two scheduled processes) sharing a path can
         # never allocate the same value, and the seq stays contiguous. The
-        # fsync makes the line durable before the lock releases. (The Phase
-        # C sink moves allocation into atomic storage; this is the
-        # local-mode equivalent, sized for local-mode files.)
+        # existing lines are VALIDATED before anything is written: a torn
+        # tail or a broken sequence must stop consequential processing at
+        # the append, not lie dormant until something happens to read the
+        # trail back. The fsync makes the line durable before the lock
+        # releases. (The Phase C sink moves allocation into atomic storage;
+        # this is the local-mode equivalent, sized for local-mode files.)
         with self._path.open("a+") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:
                 handle.seek(0)
-                seq = sum(1 for line in handle if line.strip()) + 1
+                seq = 0
+                for lineno, line in enumerate(handle, start=1):
+                    if not line.strip():
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            f"audit file {self._path} is corrupt at line "
+                            f"{lineno} (torn or malformed); refusing to "
+                            "append to a damaged audit trail. Staff must "
+                            "reconcile the file before any further run."
+                        ) from exc
+                    recorded_seq = row.get("seq") if isinstance(row, dict) else None
+                    if type(recorded_seq) is not int or recorded_seq != seq + 1:
+                        raise ValueError(
+                            f"audit file {self._path} has a broken sequence "
+                            f"at line {lineno} (expected {seq + 1}, found "
+                            f"{recorded_seq!r}); refusing to append to a "
+                            "damaged audit trail."
+                        )
+                    seq = recorded_seq
+                seq += 1
                 row = {
                     "seq": seq,
                     "recorded_at": datetime.now().astimezone().isoformat(),

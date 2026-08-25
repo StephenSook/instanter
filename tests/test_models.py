@@ -260,3 +260,26 @@ def test_numeric_floor_scans_canonical_shadows() -> None:
         with pytest.raises(ValueError):
             reject_model_numerics(poisoned, "explanation")
     assert reject_model_numerics("The deadline has passed.", "explanation")
+
+
+def test_numeric_floor_rejects_partial_separator_insertion() -> None:
+    """Round-14 reproducer: 'n-ine days' kept multi-character fragments the
+    single-letter collapse never joined."""
+    from agent.models import reject_model_numerics
+
+    for poisoned in ("n-ine days remain", "tw-enty days", "sep-tember hearing"):
+        with pytest.raises(ValueError):
+            reject_model_numerics(poisoned, "explanation")
+    assert reject_model_numerics("The deadline has passed.", "explanation")
+
+
+def test_advice_floor_rejects_partial_separator_imperatives() -> None:
+    for poisoned in ("F-ile an answer today", "P-ay the rent into the registry"):
+        with pytest.raises(ValidationError):
+            EscalationRationale(
+                case_id="X",
+                disposition="interrupt",
+                contributing_factors=["deadline overdue"],
+                rationale=poisoned,
+                confidence=0.9,
+            )

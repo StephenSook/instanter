@@ -366,7 +366,6 @@ def test_attorney_response_parsing_is_strict_and_fail_closed() -> None:
         assert action == "approved", probe
 
     deferrals = [
-        "",  # empty defers
         "approving is denied",  # prefix-match trap
         "Approve only 26ED00101, defer the rest",  # conditional never flattens
         "approve please",  # qualifier defers
@@ -377,6 +376,13 @@ def test_attorney_response_parsing_is_strict_and_fail_closed() -> None:
     for probe in deferrals:
         action, _ = parse_attorney_response(probe)
         assert action == "deferred", probe
+
+    # Round-14: an empty or non-string value is NOT a human decision; it
+    # must never read as a deferral (a transport bug would then drop
+    # urgent cases behind a green no-op run).
+    for invalid_probe in ("", "   ", None, 42):
+        action, _ = parse_attorney_response(invalid_probe)
+        assert action == "invalid", repr(invalid_probe)
 
 
 def test_refusals_are_audited(tmp_path: Path) -> None:
@@ -1680,3 +1686,99 @@ def test_enormous_attorney_response_is_digest_anchored(tmp_path: Path) -> None:
     events2 = ctx2.audit.read_all()  # type: ignore[attr-defined]
     short = [e for e in events2 if e["kind"] == "attorney_decision"][-1]["payload"]
     assert short["detail"] == "defer: attorney unavailable today"
+
+
+# --- Round-14 reproducers -----------------------------------------------------
+
+
+def test_empty_attorney_response_is_not_a_green_noop(tmp_path: Path) -> None:
+    """Round-14 reproducer: an empty transport value parsed as 'deferred',
+    which is a HUMAN decision, so one urgent interrupt candidate vanished
+    behind committed=(), failures=(), succeeded=True. An empty or
+    non-string response is 'invalid': the exchange is voided and the run
+    can never read green over it."""
+    from agent.runner import _report
+
+    ctx = make_ctx(tmp_path, [good_record("A-1", service_date="2026-08-30")], capacity=1)
+    tools = build_tools(ctx)
+    from agent.runner import _deterministic_floor
+
+    _deterministic_floor(ctx, tools, "")
+
+    assert ctx.attorney_action == ""  # no human decision was recorded
+    assert ctx.approval_invalidated
+    assert ctx.committed_case_ids == ()
+    report = _report(ctx, mode="test")
+    assert "A-1" in report.failures
+    assert not report.succeeded
+
+
+def test_nonstring_attorney_response_is_invalid(tmp_path: Path) -> None:
+    from agent.hooks import parse_attorney_response, response_audit_fields
+
+    class StatefulStr:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __str__(self) -> str:
+            self.calls += 1
+            return "approve" if self.calls == 1 else "defer: no"
+
+    action, reason = parse_attorney_response(StatefulStr())
+    assert action == "invalid"
+    assert "string" in reason
+    fields = response_audit_fields(StatefulStr())
+    assert fields == {"detail_invalid_type": "StatefulStr"}
+
+
+def test_append_refuses_a_torn_audit_tail(tmp_path: Path) -> None:
+    """Round-14 reproducer: append counted nonblank lines without parsing
+    them, so a torn tail got a new record GLUED onto it and consequential
+    processing continued over a damaged trail."""
+    from agent.audit import AuditEvent
+
+    path = tmp_path / "audit.jsonl"
+    path.write_text('{"seq":1')  # a crash mid-write
+    sink = JsonlAuditSink(path)
+    with pytest.raises(ValueError, match="torn or malformed"):
+        sink.append(AuditEvent(kind="run_started", case_id=None, payload={}, run_id="r"))
+    assert path.read_text() == '{"seq":1'  # nothing was glued on
+
+
+def test_append_refuses_a_broken_sequence(tmp_path: Path) -> None:
+    from agent.audit import AuditEvent
+
+    path = tmp_path / "audit.jsonl"
+    sink = JsonlAuditSink(path)
+    sink.append(AuditEvent(kind="run_started", case_id=None, payload={}, run_id="r"))
+    line = path.read_text()
+    path.write_text(line + line)  # duplicate seq 1
+    with pytest.raises(ValueError, match="broken sequence"):
+        sink.append(AuditEvent(kind="queue_ranked", case_id=None, payload={}, run_id="r"))
+
+
+def test_padded_case_ids_are_refused_not_duplicated(tmp_path: Path) -> None:
+    """Round-14 reproducer: '26ED00101' and '26ED00101 ' passed as two
+    distinct cases, consuming separate capacity slots for one docket."""
+    ctx = make_ctx(
+        tmp_path,
+        [
+            good_record("26ED00101", service_date="2026-08-30"),
+            IntakeRecord(
+                case_id="26ED00101 ",
+                jurisdiction_id="GA-FULTON",
+                service_date="2026-08-30",
+                service_method="personal",
+            ),
+            IntakeRecord(
+                case_id="   ",
+                jurisdiction_id="GA-FULTON",
+                service_date="2026-08-30",
+                service_method="personal",
+            ),
+        ],
+    )
+    tools = build_tools(ctx)
+    payload = json.loads(tools["get_ranked_queue"]())
+    assert {row["case_id"] for row in payload["queue"]} == {"26ED00101"}
+    assert len(payload["refused_cases"]) == 2
