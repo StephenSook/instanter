@@ -351,24 +351,32 @@ class JsonFileCaseStore:
                 return year + division + squashed[4:].translate(_SEQUENCE_CONFUSABLES)
             return squashed.translate(_SEQUENCE_CONFUSABLES)
 
-        counts: dict[str, int] = {}
-        first_seen: dict[str, str] = {}
+        # Every spelling that contests an identity is named in its own
+        # refusal row. Emitting one row for the first-seen id left the
+        # sibling spelling in NO report channel at all: not interrupts,
+        # not committed, not refused, so a case could vanish from the
+        # report entirely (the run still read red, but a reader could not
+        # see what had been dropped). The reason names the whole colliding
+        # set rather than claiming an id "appears more than once", which
+        # is false when two different spellings collide.
+        spellings: dict[str, list[str]] = {}
         for case_id in [r.case_id for r in records] + malformed_real_ids:
-            key = _identity_key(case_id)
-            counts[key] = counts.get(key, 0) + 1
-            first_seen.setdefault(key, case_id)
-        duplicated = {key for key, count in counts.items() if count > 1}
+            spellings.setdefault(_identity_key(case_id), []).append(case_id)
+        duplicated = {key for key, ids in spellings.items() if len(ids) > 1}
         if duplicated:
             for key in sorted(duplicated):
-                original = first_seen[key]
-                malformed.append(
-                    MalformedIntakeRow(
-                        original,
-                        f"case_id {original!r} appears more than once in the intake "
-                        "(padded, case-variant, or malformed siblings included); "
-                        "identity is ambiguous and every row carrying it is refused",
+                colliding = spellings[key]
+                rendered = ", ".join(repr(i) for i in colliding)
+                for case_id in colliding:
+                    malformed.append(
+                        MalformedIntakeRow(
+                            case_id,
+                            f"case_id {case_id!r} shares one docket identity with "
+                            f"{rendered} (separator, padding, case, or lookalike "
+                            "variants included); identity is ambiguous and every "
+                            "row carrying it is refused",
+                        )
                     )
-                )
             records = [r for r in records if _identity_key(r.case_id) not in duplicated]
         if not records and not malformed:
             raise IntakeParseError("intake file contains zero records")

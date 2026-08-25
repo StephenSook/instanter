@@ -1943,7 +1943,12 @@ def test_case_variant_sibling_contests_identity(tmp_path: Path) -> None:
     store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
     result = store.load_intake()
     assert result.records == ()  # the stale row never sweeps alone
-    assert any("more than once" in m.reason for m in result.malformed)
+    # Every colliding spelling is refused BY NAME (round 24): a sibling
+    # left unnamed appeared in no report channel at all.
+    assert {m.row_key for m in result.malformed} == {"26ED00101", "26ed00101"}
+    # One row is refused for its schema typo, the other for the shared
+    # identity; both ids are named above, which is the contract.
+    assert any("shares one docket identity" in m.reason for m in result.malformed)
 
 
 def test_capacity_zero_is_refused_at_run_construction(tmp_path: Path) -> None:
@@ -2089,7 +2094,10 @@ def test_confusable_ascii_docket_twins_are_contested(tmp_path: Path) -> None:
     store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
     result = store.load_intake()
     assert result.records == ()  # both contested, neither sweeps alone
-    assert any("more than once" in m.reason for m in result.malformed)
+    # Every colliding spelling is refused BY NAME (round 24): a sibling
+    # left unnamed appeared in no report channel at all.
+    assert {m.row_key for m in result.malformed} == {"26ED00101", "26EDO0101"}
+    assert all("shares one docket identity" in m.reason for m in result.malformed)
 
 
 def test_summons_conflict_memo_carries_both_dates(tmp_path: Path) -> None:
@@ -2219,7 +2227,10 @@ def test_s_for_five_docket_twin_is_contested(tmp_path: Path) -> None:
     store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
     result = store.load_intake()
     assert result.records == ()
-    assert any("more than once" in m.reason for m in result.malformed)
+    # Every colliding spelling is refused BY NAME (round 24): a sibling
+    # left unnamed appeared in no report channel at all.
+    assert {m.row_key for m in result.malformed} == {"26ED00105", "26ED0010S"}
+    assert all("shares one docket identity" in m.reason for m in result.malformed)
 
 
 # --- Round-20 reproducers -----------------------------------------------------
@@ -2362,7 +2373,10 @@ def test_g_for_six_docket_twin_is_contested(tmp_path: Path) -> None:
     store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
     result = store.load_intake()
     assert result.records == ()
-    assert any("more than once" in m.reason for m in result.malformed)
+    # Every colliding spelling is refused BY NAME (round 24): a sibling
+    # left unnamed appeared in no report channel at all.
+    assert {m.row_key for m in result.malformed} == {"26ED00106", "26ED0010G"}
+    assert all("shares one docket identity" in m.reason for m in result.malformed)
 
 
 def test_audit_sink_detects_whole_file_replacement(tmp_path: Path) -> None:
@@ -2575,3 +2589,35 @@ def test_realistic_docket_population_has_no_false_contests(tmp_path: Path) -> No
     records, malformed = _load_ids(tmp_path, ids, "population")
     assert len(records) == len(ids)
     assert malformed == ()
+
+
+def test_every_colliding_spelling_is_named_in_the_report(tmp_path: Path) -> None:
+    """Round-24 residual: only the first-seen id was named, so a sibling
+    spelling appeared in NO report channel and a reader could not see what
+    the run had dropped. Every spelling that contests an identity is now
+    refused by name."""
+    store = JsonFileCaseStore(
+        intake_path=_write_intake(
+            tmp_path,
+            [
+                {
+                    "case_id": case_id,
+                    "jurisdiction_id": "GA-FULTON",
+                    "service_date": "2026-08-30",
+                    "service_method": "personal",
+                }
+                for case_id in ("26ED00101", "26ED-00101", _DISTINCT_URGENT)
+            ],
+        ),
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    ctx = RunContext(
+        run_date=RUN_DATE,
+        attorney_capacity=2,
+        store=store,
+        audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+    )
+    report = run_deterministic(ctx, "approve")
+    assert set(report.refused) == {"26ED00101", "26ED-00101"}
+    assert _DISTINCT_URGENT in report.committed
+    assert not report.succeeded

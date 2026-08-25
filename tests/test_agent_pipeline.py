@@ -89,8 +89,9 @@ def test_duplicate_case_ids_refuse(tmp_path: Path) -> None:
     # Identity is ambiguous for every row carrying the id: none is swept,
     # the refusal fails the run, and the rest of an intake still processes.
     assert result.records == ()
-    assert [m.row_key for m in result.malformed] == ["X"]
-    assert "more than once" in result.malformed[0].reason
+    # Both rows carrying the contested identity are refused by name.
+    assert [m.row_key for m in result.malformed] == ["X", "X"]
+    assert all("shares one docket identity" in m.reason for m in result.malformed)
 
 
 # --- Tool contracts -----------------------------------------------------------
