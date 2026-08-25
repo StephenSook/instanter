@@ -98,3 +98,55 @@ def test_rationale_rejects_bare_urgency_score() -> None:
 def test_rationale_requires_at_least_one_factor() -> None:
     with pytest.raises(ValidationError):
         EscalationRationale(**valid_rationale(contributing_factors=[]))  # type: ignore[arg-type]
+
+
+# --- UPL floor hardening (the adversarial-review payloads) --------------------
+
+
+ADVICE_PAYLOADS = [
+    "File an answer today and claim defective service.",  # the review's exact probe
+    "You must respond by Friday to avoid default.",
+    "You need to appear at the hearing.",
+    "Pay the rent into the court registry before the hearing",
+    "Appeal the judgment immediately",
+    "The facts here argue tender as a complete defense",
+    "FILE AN ANSWER TODAY",  # casing
+    "Ｆile an answer today",  # noqa: RUF001 (deliberate fullwidth lookalike)
+    "The tenant must contest the amount",
+    "The tenant needs to respond this week",
+]
+
+
+@pytest.mark.parametrize("payload", ADVICE_PAYLOADS)
+def test_hardened_floor_rejects_imperative_advice(payload: str) -> None:
+    with pytest.raises(ValidationError):
+        EscalationRationale(
+            case_id="X",
+            disposition="interrupt",
+            contributing_factors=["deadline overdue"],
+            rationale=payload,
+            confidence=0.9,
+        )
+
+
+FACTUAL_PAYLOADS = [
+    "Deadline passed with no answer on file; writ exposure is live.",
+    "The effective deadline is 2026-09-09, 0 day(s) away; rank 1 of 2.",
+    "Notes report possibly defective service; staff must confirm today.",
+    "An answer was filed on the docket; no default exposure remains.",
+    "Tenant plans to pay everything owed this week per the notes.",
+    "Service was by tack and mail; the mailing date is unverified.",
+    "[MODEL DISABLED: templated rationale] This case ranks 1 this run.",
+]
+
+
+@pytest.mark.parametrize("payload", FACTUAL_PAYLOADS)
+def test_hardened_floor_passes_factual_statements(payload: str) -> None:
+    rationale = EscalationRationale(
+        case_id="X",
+        disposition="interrupt",
+        contributing_factors=["deadline overdue"],
+        rationale=payload,
+        confidence=0.9,
+    )
+    assert rationale.rationale == payload

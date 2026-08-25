@@ -10,12 +10,19 @@ routed to a human, never delivered.
 
 from __future__ import annotations
 
+import re
+import unicodedata
+
 from pydantic import BaseModel, Field, field_validator
 
-# Advice-language boundary. Deliberately small and literal: the Strands
-# OutputEvaluator scores rationale quality more broadly offline; this
-# validator is the hard runtime floor. Every phrase is lowercase; matching
-# is case-insensitive substring.
+# Advice-language boundary: the hard RUNTIME FLOOR, not the guarantee. No
+# blocklist is complete; the guarantee in this system is architectural (a
+# licensed attorney reviews every surfaced output, and the packet's draft
+# answer keeps every defense field blank). This floor exists so obvious
+# drift fails validation loudly and is audited, and it is layered: literal
+# phrases, second-person directives, imperative legal-action sentence
+# openings, and defense-coupling patterns, all matched over NFKC-normalized
+# casefolded text so Unicode lookalikes and casing do not slip past.
 _ADVICE_PHRASES: tuple[str, ...] = (
     "you should",
     "we recommend",
@@ -29,16 +36,65 @@ _ADVICE_PHRASES: tuple[str, ...] = (
     "legal advice",
     "advise the tenant",
     "the tenant should",
+    "the tenant must",
+    "the tenant needs to",
+)
+
+# Second-person directives: telling anyone what they legally should do.
+_SECOND_PERSON_DIRECTIVE = re.compile(
+    r"\byou\s+(should|must|need\s+to|have\s+to|ought\s+to|will\s+want\s+to|can\s+win|will\s+win)\b"
+)
+# Imperative sentence openings with a legal-action verb ("File an answer
+# today..."). Sentence-initial only: factual prose about filings passes.
+_LEGAL_ACTION_VERBS = (
+    "file",
+    "pay",
+    "sue",
+    "appeal",
+    "contest",
+    "plead",
+    "appear",
+    "claim",
+    "assert",
+    "vacate",
+    "withhold",
+    "countersue",
+    "dispute",
+)
+_SENTENCE_SPLIT = re.compile(r"[.!?;\n]+")
+# A legal-action verb coupled to a defense-shaped object anywhere in a
+# sentence ("... and claim defective service").
+_DEFENSE_COUPLING = re.compile(
+    r"\b(claim|assert|raise|plead|argue)\b[^.!?;\n]{0,60}"
+    r"\b(defense|defective|tender|counterclaim|estoppel|retaliation|habitability|jury)\b"
 )
 
 
 def _reject_advice_language(text: str, field_name: str) -> str:
-    lowered = text.lower()
+    normalized = unicodedata.normalize("NFKC", text).casefold()
     for phrase in _ADVICE_PHRASES:
-        if phrase in lowered:
+        if phrase in normalized:
             raise ValueError(
                 f"{field_name} contains advice language ({phrase!r}); this "
                 "system states facts for a licensed attorney and never advises"
+            )
+    if _SECOND_PERSON_DIRECTIVE.search(normalized):
+        raise ValueError(
+            f"{field_name} contains a second-person legal directive; this "
+            "system states facts for a licensed attorney and never advises"
+        )
+    if _DEFENSE_COUPLING.search(normalized):
+        raise ValueError(
+            f"{field_name} couples a legal action to a defense; this system "
+            "states facts for a licensed attorney and never advises"
+        )
+    for sentence in _SENTENCE_SPLIT.split(normalized):
+        first_word = sentence.strip().split(" ", 1)[0] if sentence.strip() else ""
+        if first_word in _LEGAL_ACTION_VERBS:
+            raise ValueError(
+                f"{field_name} opens a sentence with the imperative "
+                f"{first_word!r}; this system states facts for a licensed "
+                "attorney and never advises"
             )
     return text
 
