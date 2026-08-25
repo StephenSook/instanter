@@ -194,6 +194,15 @@ def test_packet_memo_only_for_committed_and_no_advice(tmp_path: Path) -> None:
     )
     assert "VALIDATION FAILED" in poisoned
     assert interrupt_id not in ctx.packet_memos
+    # Round-10: notes are structurally incapable of carrying a date, day
+    # count, or rank; a contradictory figure beside the fact sheet defeats
+    # the deterministic-facts guarantee.
+    numeric = tools["write_packet_memo"](
+        case_id=interrupt_id,
+        notes="Confirm the 30-day deadline on 2027-01-01 and rank 99.",
+    )
+    assert "VALIDATION FAILED" in numeric
+    assert interrupt_id not in ctx.packet_memos
     assert "recorded" in tools["write_packet_memo"](
         case_id=interrupt_id, notes="Confirm the mailing date with the tenant."
     )

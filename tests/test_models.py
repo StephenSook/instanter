@@ -131,6 +131,9 @@ ADVICE_PAYLOADS = [
     "F 1 l e an answer today",
     "Y 0 u should file an answer today",
     "F.i.l.e an answer today",
+    # Round-10 reproducers: multi-character separators
+    "Please f. i. l. e an answer today.",
+    "F.-1-l-e an answer today.",
 ]
 
 

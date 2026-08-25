@@ -43,10 +43,17 @@ def packet_facts(ctx: RunContext, case_id: str) -> str:
     if deadline is not None and deadline.effective_deadline is not None:
         parts.append(f"Effective deadline {deadline.effective_deadline}.")
     if decision is not None:
-        parts.append(
-            f"{decision.days_remaining} day(s) remaining at the run date "
-            f"{ctx.run_date.isoformat()}; queue rank {decision.rank}."
-        )
+        if decision.days_remaining is not None:
+            parts.append(
+                f"{decision.days_remaining} day(s) remaining at the run date "
+                f"{ctx.run_date.isoformat()}; queue rank {decision.rank}."
+            )
+        else:
+            # The no-clock state is a fact too: never render "None day(s)".
+            parts.append(
+                "No reliable deadline was established; the attorney must "
+                f"resolve the intake facts. Queue rank {decision.rank}."
+            )
     if record is not None:
         parts.append(f"Service method recorded as {record.service_method}.")
     if deadline is not None and deadline.flags:
@@ -615,6 +622,16 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
 
         if notes:
             try:
+                if any(ch.isdigit() for ch in notes):
+                    # Notes are structurally incapable of carrying a date, a
+                    # day count, or a rank: every number in a memo comes from
+                    # the deterministic fact sheet, and a note stating a
+                    # contradictory figure beside it would defeat exactly
+                    # that guarantee.
+                    raise ValueError(
+                        "notes must contain no digits; every date, day "
+                        "count, and rank comes from the system's fact sheet"
+                    )
                 _reject_advice_language(notes, "notes")
             except ValueError as exc:
                 # A drafter drifting into advice language is a UPL-boundary
