@@ -90,6 +90,19 @@ class TriageCase:
     # Operational context only: it NEVER changes a disposition level, only
     # capacity accounting (a resource-axis input, per ESI).
     effort_minutes: int | None = None
+    # Note-derived signals (validated model observations). Bounded inputs to
+    # a fail-closed policy: any of them can FLOOR a case at L2 surface-today
+    # (a human must look at it today), and none of them can create an L1
+    # interrupt or lower anything. Interrupts stay derived exclusively from
+    # verified intake fields; model perception summons human attention, it
+    # never fires the interrupt itself.
+    notes_present: bool = False
+    observation_missing: bool = False  # notes exist but were never analyzed
+    observed_service_by_posting: bool | None = None
+    observed_answer_already_filed: bool | None = None
+    observed_hearing_or_deadline_change: bool | None = None
+    observed_possible_defective_service: bool | None = None
+    observation_needs_confirmation: bool = False
 
 
 @dataclass(frozen=True)
@@ -109,6 +122,22 @@ def _raise_level(level: UrgencyLevel, steps: int = 1) -> UrgencyLevel:
     index = min(_SEVERITY_ORDER.index(level) + steps, len(_SEVERITY_ORDER) - 1)
     # L0 never rises through discriminators: a filed answer is not urgent.
     return _SEVERITY_ORDER[index]
+
+
+def _note_floor(
+    level: UrgencyLevel,
+    raised_by: list[str],
+    factors: list[str],
+    reason: str,
+    factor: str,
+) -> UrgencyLevel:
+    """Floor a case at L2 surface-today on a note-derived signal. Records
+    the reason only when the level actually moved; the factor always."""
+    if _SEVERITY_ORDER.index(level) < _SEVERITY_ORDER.index(UrgencyLevel.L2_SURFACE_TODAY):
+        level = UrgencyLevel.L2_SURFACE_TODAY
+        raised_by.append(reason)
+    factors.append(factor)
+    return level
 
 
 def _severity_key(decision_input: tuple[UrgencyLevel, int | None, int, str]) -> tuple[int, ...]:
@@ -210,6 +239,62 @@ def triage_queue(
             level = _raise_level(level)
             raised_by.append("unverified_clock")
             factors.append("the deadline basis is unverified; attorney confirmation required")
+
+        # Note-derived signal policy (fail closed, bounded): each signal can
+        # floor the case at L2 surface-today so a human looks at it TODAY,
+        # and nothing here can mint an L1 interrupt or lower a level.
+        if case.observation_missing:
+            level = _note_floor(
+                level,
+                raised_by,
+                factors,
+                "unanalyzed_notes",
+                "intake notes exist but were never analyzed; a human must read "
+                "them today (unread notes may hide urgency)",
+            )
+        if case.observed_possible_defective_service:
+            level = _note_floor(
+                level,
+                raised_by,
+                factors,
+                "defective_service_mention",
+                "notes report possibly defective service; staff must confirm today",
+            )
+        if case.observed_hearing_or_deadline_change:
+            level = _note_floor(
+                level,
+                raised_by,
+                factors,
+                "deadline_change_mention",
+                "notes report a hearing or deadline change; the tenant's "
+                "understanding of the clock may be wrong",
+            )
+        if case.observed_service_by_posting and not (flag_codes & _SERVICE_RISK_FLAGS):
+            # The intake fields did NOT record tack-and-mail but the notes
+            # describe it: the recorded service method may be wrong.
+            level = _note_floor(
+                level,
+                raised_by,
+                factors,
+                "posting_service_mention",
+                "notes describe posted service the intake fields do not "
+                "record; the service method needs staff confirmation",
+            )
+        if case.observation_needs_confirmation:
+            level = _note_floor(
+                level,
+                raised_by,
+                factors,
+                "needs_human_confirmation",
+                "the notes analysis flagged uncertain or conflicting facts for human confirmation",
+            )
+        if case.observed_answer_already_filed and not case.answer_filed:
+            # Fail-closed direction: a mentioned-but-unconfirmed filed answer
+            # never LOWERS urgency; it is recorded for the reviewing human.
+            factors.append(
+                "notes mention an answer may already be filed; staff should "
+                "confirm the docket before further action"
+            )
 
         staged.append((case, level, floor, raised_by, days_remaining, factors))
 

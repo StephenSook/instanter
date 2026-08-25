@@ -165,11 +165,28 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                     run_id=ctx.run_id,
                 )
             )
+            obs = ctx.observations.get(record.case_id)
+            notes_present = bool(record.notes.strip())
             cases.append(
                 TriageCase(
                     case_id=record.case_id,
                     deadline=result,
                     answer_filed=record.answer_filed,
+                    notes_present=notes_present,
+                    observation_missing=notes_present and obs is None,
+                    observed_service_by_posting=(obs.mentions_service_by_posting if obs else None),
+                    observed_answer_already_filed=(
+                        obs.mentions_answer_already_filed if obs else None
+                    ),
+                    observed_hearing_or_deadline_change=(
+                        obs.mentions_hearing_or_deadline_change if obs else None
+                    ),
+                    observed_possible_defective_service=(
+                        obs.mentions_possible_defective_service if obs else None
+                    ),
+                    observation_needs_confirmation=(
+                        bool(obs.needs_human_confirmation) if obs else False
+                    ),
                 )
             )
 

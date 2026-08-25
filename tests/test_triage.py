@@ -13,6 +13,7 @@ degenerates into "arithmetic in a costume". Each is pinned here:
 
 from dataclasses import fields
 from datetime import date
+from typing import Any
 
 import pytest
 
@@ -183,3 +184,125 @@ def test_severity_ordering_is_deterministic_and_stable() -> None:
     order_one = [d.case_id for d in triage_queue(cases, RUN_DATE, 2)]
     order_two = [d.case_id for d in triage_queue(list(reversed(cases)), RUN_DATE, 2)]
     assert order_one == order_two == ["A", "B"]
+
+
+# --- Note-derived signal policy (fail closed, bounded at L2) ------------------
+
+
+def make_signal_case(
+    case_id: str,
+    service: date | None,
+    method: ServiceMethod = ServiceMethod.PERSONAL,
+    answer_filed: bool = False,
+    **triage_kwargs: object,
+) -> TriageCase:
+    deadline = compute_deadline(
+        CaseInput(
+            case_id=case_id,
+            jurisdiction_id="GA-FULTON",
+            service_date=service,
+            service_method=method,
+        ),
+        GEORGIA_RULE,
+    )
+    return TriageCase(
+        case_id=case_id,
+        deadline=deadline,
+        answer_filed=answer_filed,
+        **triage_kwargs,  # type: ignore[arg-type]
+    )
+
+
+FAR_OUT = date(2026, 8, 10)  # deadline Aug 17: L3 monitor floor
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "reason"),
+    [
+        ({"notes_present": True, "observation_missing": True}, "unanalyzed_notes"),
+        ({"observed_possible_defective_service": True}, "defective_service_mention"),
+        ({"observed_hearing_or_deadline_change": True}, "deadline_change_mention"),
+        ({"observed_service_by_posting": True}, "posting_service_mention"),
+        ({"observation_needs_confirmation": True}, "needs_human_confirmation"),
+    ],
+)
+def test_each_note_signal_independently_floors_at_surface_today(
+    kwargs: dict[str, Any], reason: str
+) -> None:
+    decisions = decide([make_signal_case("C1", FAR_OUT, **kwargs)])
+    assert decisions["C1"].level is UrgencyLevel.L2_SURFACE_TODAY
+    assert reason in decisions["C1"].raised_by
+
+
+def test_note_signals_never_create_an_interrupt() -> None:
+    """Model perception summons human attention; it never fires the
+    interrupt itself. All signals together still cap at L2."""
+    decisions = decide(
+        [
+            make_signal_case(
+                "C1",
+                FAR_OUT,
+                notes_present=True,
+                observation_missing=False,
+                observed_possible_defective_service=True,
+                observed_hearing_or_deadline_change=True,
+                observed_service_by_posting=True,
+                observation_needs_confirmation=True,
+            )
+        ]
+    )
+    assert decisions["C1"].level is UrgencyLevel.L2_SURFACE_TODAY
+
+
+def test_note_signals_never_lower_an_interrupt() -> None:
+    decisions = decide(
+        [
+            make_signal_case(
+                "C1",
+                date(2026, 8, 4),  # overdue: L1
+                observed_answer_already_filed=True,
+                observation_needs_confirmation=True,
+            )
+        ]
+    )
+    assert decisions["C1"].level is UrgencyLevel.L1_INTERRUPT
+
+
+def test_posting_mention_defers_to_intake_service_flags() -> None:
+    """When the intake fields already carry tack-and-mail flags, the notes
+    mentioning posting adds nothing: no double-raise for one fact."""
+    decisions = decide(
+        [
+            make_signal_case(
+                "C1",
+                date(2026, 8, 10),
+                method=ServiceMethod.TACK_AND_MAIL,
+                observed_service_by_posting=True,
+            )
+        ]
+    )
+    assert "service_method_risk" in decisions["C1"].raised_by
+    assert "posting_service_mention" not in decisions["C1"].raised_by
+
+
+def test_mentioned_filed_answer_is_recorded_but_never_lowers() -> None:
+    decisions = decide(
+        [make_signal_case("C1", date(2026, 8, 5), observed_answer_already_filed=True)]
+    )
+    assert decisions["C1"].level is UrgencyLevel.L1_INTERRUPT
+    assert any("staff should confirm the docket" in f for f in decisions["C1"].factors)
+
+
+def test_confirmed_hold_is_not_resurrected_by_note_signals() -> None:
+    decisions = decide(
+        [
+            make_signal_case(
+                "C1",
+                date(2026, 8, 5),
+                answer_filed=True,
+                observed_possible_defective_service=True,
+                observation_needs_confirmation=True,
+            )
+        ]
+    )
+    assert decisions["C1"].level is UrgencyLevel.L0_HOLD
