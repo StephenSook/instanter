@@ -33,6 +33,9 @@ venv/
 /CLAUDE.md
 /AGENTS.md
 /.claude/
+# ...and any nested one. The anchored pattern above misses mobile/.claude/,
+# which a tool created there; personal assistant config is never committed.
+.claude/
 /docs/private/
 /frontend doc
 /image.png
