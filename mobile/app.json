@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "Instanter",
+    "slug": "instanter",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.stephensookra.instanter",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.stephensookra.instanter",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "scheme": "instanter",
+    "backgroundColor": "#141414",
+    "primaryColor": "#c2352b",
+    "extra": {
+      "doorUrl": "https://d2ew2t4uldglcr.cloudfront.net",
+      "eas": {
+        "projectId": "f6e678f9-6942-4797-8c5a-c46db300dbf2"
+      }
+    },
+    "owner": "stephensook"
+  }
+}
