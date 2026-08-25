@@ -11,6 +11,7 @@ not the first.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -47,11 +48,16 @@ class IntakeParseError(ValueError):
 def _parse_date(value: str | None, field_name: str, case_id: str) -> date | None:
     if value is None:
         return None
+    # TypeError matters as much as ValueError: a JSON number or boolean in a
+    # date field raises TypeError from fromisoformat, and IntakeRecord is a
+    # plain dataclass with no runtime type validation, so this is the first
+    # place a wrongly-typed value can be caught as a refusal instead of a
+    # sweep-killing crash.
     try:
         return date.fromisoformat(value)
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         raise IntakeParseError(
-            f"case {case_id}: {field_name} {value!r} is not an ISO date"
+            f"case {case_id}: {field_name} {value!r} is not an ISO date string"
         ) from exc
 
 
@@ -123,17 +129,30 @@ class JsonFileCaseStore:
     def record_escalation(self, escalation: EscalationRecord) -> None:
         payload = asdict(escalation)
         payload["recorded_at"] = datetime.now().astimezone().isoformat()
+        # Flush + fsync: an escalation either exists durably or this raises
+        # into commit_escalations' loud partial-failure handler. (The Phase C
+        # DynamoDB store makes durability and idempotency storage properties
+        # via conditional writes; this is the local-mode equivalent.)
         with self._escalations_path.open("a") as handle:
             handle.write(json.dumps(payload) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
 
     def list_escalations(self, run_id: str | None = None) -> list[EscalationRecord]:
         if not self._escalations_path.exists():
             return []
         out: list[EscalationRecord] = []
-        for line in self._escalations_path.read_text().splitlines():
+        for lineno, line in enumerate(self._escalations_path.read_text().splitlines(), start=1):
             if not line.strip():
                 continue
-            data = json.loads(line)
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"escalation store {self._escalations_path} is corrupt at "
+                    f"line {lineno}; refusing to read a damaged store. Earlier "
+                    "lines are intact JSONL and recoverable by hand."
+                ) from exc
             data.pop("recorded_at", None)
             record = EscalationRecord(**{**data, "factors": tuple(data.get("factors", ()))})
             if run_id is None or record.run_id == run_id:

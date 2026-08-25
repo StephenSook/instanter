@@ -85,6 +85,36 @@ def test_malformed_record_becomes_refusal_not_crash(tmp_path: Path) -> None:
     assert kinds.count("deadline_computed") == 2
 
 
+def test_wrongly_typed_date_becomes_refusal_not_crash(tmp_path: Path) -> None:
+    """A JSON number in a date field raises TypeError (not ValueError) from
+    fromisoformat, and IntakeRecord has no runtime type validation, so this
+    must be owned by the refusal path, not detonate mid-sweep."""
+    ctx = make_ctx(
+        tmp_path,
+        [
+            good_record("GOOD-1"),
+            IntakeRecord(
+                case_id="BAD-3",
+                jurisdiction_id="GA-FULTON",
+                service_date=20260901,  # type: ignore[arg-type]
+                service_method="personal",
+            ),
+            IntakeRecord(
+                case_id="BAD-4",
+                jurisdiction_id="GA-FULTON",
+                service_date="2026-09-01",
+                service_method="personal",
+                amended_affidavit="true",  # type: ignore[arg-type]
+            ),
+        ],
+    )
+    tools = build_tools(ctx)
+    payload = json.loads(tools["get_ranked_queue"]())
+    assert {row["case_id"] for row in payload["queue"]} == {"GOOD-1"}
+    assert {r["case_id"] for r in payload["refused_cases"]} == {"BAD-3", "BAD-4"}
+    assert audit_kinds(ctx).count("case_refused") == 2
+
+
 def test_unknown_service_method_becomes_refusal_not_crash(tmp_path: Path) -> None:
     ctx = make_ctx(
         tmp_path,
@@ -300,6 +330,53 @@ def test_graph_exception_still_runs_floor_and_reports_model_error(
 
 
 # --- Corrupt intake must fail loudly before anything runs ---------------------
+
+
+def test_audit_seq_continues_across_sink_instances(tmp_path: Path) -> None:
+    from agent.audit import AuditEvent
+
+    path = tmp_path / "audit.jsonl"
+    first = JsonlAuditSink(path)
+    first.append(AuditEvent(kind="run_started", case_id=None, payload={}, run_id="r1"))
+    first.append(AuditEvent(kind="run_finished", case_id=None, payload={}, run_id="r1"))
+    second = JsonlAuditSink(path)
+    second.append(AuditEvent(kind="run_started", case_id=None, payload={}, run_id="r2"))
+    seqs = [e["seq"] for e in second.read_all()]
+    assert seqs == [1, 2, 3]  # no reuse across runs appended to one file
+
+
+def test_corrupt_audit_line_is_loud_and_names_the_line(tmp_path: Path) -> None:
+    from agent.audit import AuditEvent
+
+    path = tmp_path / "audit.jsonl"
+    sink = JsonlAuditSink(path)
+    sink.append(AuditEvent(kind="run_started", case_id=None, payload={}, run_id="r1"))
+    with path.open("a") as handle:
+        handle.write('{"seq": 2, "torn')  # simulated torn tail
+    with pytest.raises(ValueError, match="line 2"):
+        JsonlAuditSink(path).read_all()
+
+
+def test_corrupt_escalation_line_is_loud_and_names_the_line(tmp_path: Path) -> None:
+    store = JsonFileCaseStore(
+        intake_path=tmp_path / "unused.json",
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    store.record_escalation(
+        EscalationRecord(
+            case_id="A-1",
+            disposition="interrupt",
+            rank=1,
+            factors=("overdue",),
+            rationale="Deadline passed.",
+            confidence=1.0,
+            run_id="r1",
+        )
+    )
+    with (tmp_path / "escalations.jsonl").open("a") as handle:
+        handle.write("{torn")
+    with pytest.raises(ValueError, match="line 2"):
+        store.list_escalations()
 
 
 def test_corrupt_intake_file_raises_loudly(tmp_path: Path) -> None:
