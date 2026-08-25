@@ -1347,3 +1347,44 @@ def test_invalidated_approval_gets_the_pending_floor(
     assert len(report.committed) == 2  # the sweep still delivered, as pending
     assert report.failures == ()
     assert not report.succeeded
+
+
+# --- Round-10 reproducer ------------------------------------------------------
+
+
+def test_no_clock_interrupt_memo_states_missing_deadline(tmp_path: Path) -> None:
+    """Round-10 reproducer: a tack-and-mail case with no service date has
+    no deadline at all; its committed packet memo previously rendered the
+    literal 'None day(s) remaining'. The no-clock state must be stated
+    explicitly and the malformed rendering must be impossible."""
+    ctx = make_ctx(
+        tmp_path,
+        [
+            IntakeRecord(
+                case_id="NC-1",
+                jurisdiction_id="GA-FULTON",
+                service_date=None,
+                service_method="tack_and_mail",
+            )
+        ],
+        capacity=1,
+    )
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    decision = ctx.interrupt_candidates[0]
+    assert decision.days_remaining is None
+    tools["submit_escalation_rationale"](
+        case_id="NC-1",
+        disposition=decision.level.value,
+        contributing_factors=list(decision.factors)[:8],
+        rationale="No reliable deadline exists; staff must resolve the intake facts today.",
+        confidence=0.9,
+    )
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, ("NC-1",))
+    tools["commit_escalations"]()
+    tools["write_packet_memo"](case_id="NC-1", notes="")
+
+    memo = ctx.packet_memos["NC-1"]
+    assert "None day(s)" not in memo
+    assert "No reliable deadline was established" in memo

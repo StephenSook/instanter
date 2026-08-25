@@ -292,9 +292,22 @@ def _run_graph_case(
         for e in events
         if e["kind"] == "packet_memo_recorded"
     }
-    memos_grounded = all(
-        effective_by_case.get(case_id, "") in memo for case_id, memo in memos_by_case.items()
-    )
+
+    def _memo_grounded(case_id: str, memo: str) -> bool:
+        # Typed comparison, not substring luck: a real deadline must appear
+        # as the fact-sheet sentence; a missing clock must be stated
+        # explicitly (never a stringified None); and the reviewer-notes
+        # tail must carry no digits, so a note cannot place a contradictory
+        # date or rank beside the correct fact sheet.
+        effective = effective_by_case.get(case_id, "")
+        if effective and effective != "None":
+            anchored = f"Effective deadline {effective}." in memo
+        else:
+            anchored = "No reliable deadline was established" in memo
+        notes_tail = memo.split("Reviewer notes:", 1)[1] if "Reviewer notes:" in memo else ""
+        return anchored and not any(ch.isdigit() for ch in notes_tail)
+
+    memos_grounded = all(_memo_grounded(cid, memo) for cid, memo in memos_by_case.items())
     return {
         "output": {
             "committed": list(report.committed),
