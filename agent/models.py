@@ -371,23 +371,33 @@ _WORD_TOKEN = re.compile(r"[a-z]+")
 
 def reject_model_numerics(text: str, field_name: str) -> str:
     """Fail closed on any model-authored quantity: digits, number words,
-    month names. The stated recovery matters: a live model retries on the
-    error text, and a rejection with no way out starves the sweep into the
-    floor."""
+    month names, over the SAME canonical shadows the advice floor scans
+    (a combining mark or separated letters must not smuggle 'nïne' or
+    'n.i.n.e' past a literal wordlist). The stated recovery matters: a
+    live model retries on the error text, and a rejection with no way out
+    starves the sweep into the floor."""
     if any(ch.isdigit() for ch in text):
         raise ValueError(
             f"{field_name} must contain no digits; every date, day count, "
             "and rank is rendered by the system. State the fact without "
             "the figure and resubmit."
         )
-    lowered = unicodedata.normalize("NFKC", text).casefold()
-    for token in _WORD_TOKEN.findall(lowered):
-        if token in _NUMBER_WORDS:
-            raise ValueError(
-                f"{field_name} contains the number or date word {token!r}; "
-                "quantities and dates come only from the system's fact "
-                "sheet. State the fact without the figure and resubmit."
-            )
+    normalized = unicodedata.normalize("NFKC", text).casefold().translate(_HOMOGLYPH_FOLD)
+    demarked = _strip_marks(normalized)
+    canonical = _collapse_spaced_letters(_collapse_separated_letters(demarked))
+    for variant in {
+        normalized,
+        demarked,
+        _collapse_separated_letters(demarked),
+        canonical,
+    }:
+        for token in _WORD_TOKEN.findall(variant):
+            if token in _NUMBER_WORDS:
+                raise ValueError(
+                    f"{field_name} contains the number or date word {token!r}; "
+                    "quantities and dates come only from the system's fact "
+                    "sheet. State the fact without the figure and resubmit."
+                )
     return text
 
 

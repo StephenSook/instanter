@@ -129,7 +129,7 @@ def _apply_attorney_decision(ctx: RunContext, tools: dict[str, Any], response: s
     writer agent calls: one code path for store writes, partial-failure
     handling, and audit events. Parsing is the same strict fail-closed
     parse the approval hook uses."""
-    from agent.hooks import bind_approval, parse_attorney_response
+    from agent.hooks import bind_approval, parse_attorney_response, response_audit_fields
 
     action, reason = parse_attorney_response(response)
     ctx.attorney_action = action
@@ -143,9 +143,9 @@ def _apply_attorney_decision(ctx: RunContext, tools: dict[str, Any], response: s
             case_id=None,
             payload={
                 "action": action,
-                "detail": response.strip()[:400],
                 "reason": reason,
                 "approved_cases": list(ctx.approved_case_ids or ()),
+                **response_audit_fields(response),
             },
             run_id=ctx.run_id,
         )

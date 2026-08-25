@@ -243,3 +243,20 @@ def test_ambiguities_accept_digitless_open_questions() -> None:
         confidence=0.8,
     )
     assert obs.ambiguities
+
+
+def test_numeric_floor_scans_canonical_shadows() -> None:
+    """Round-13 reproducer: 'nïne days' beat the literal wordlist because
+    numeric matching skipped the diacritic and separator shadows the
+    advice floor already scans."""
+    from agent.models import reject_model_numerics
+
+    for poisoned in (
+        "The deadline is nïne days away.",
+        "The deadline is n i n e days away.",
+        "The deadline is n.i.n.e days away.",
+        "Due in Dеcember.",  # noqa: RUF001 (Cyrillic small ie homoglyph)
+    ):
+        with pytest.raises(ValueError):
+            reject_model_numerics(poisoned, "explanation")
+    assert reject_model_numerics("The deadline has passed.", "explanation")

@@ -637,6 +637,18 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                     )
                 )
         ctx.committed_case_ids = tuple(already)
+        # A detected conflict is a PREFLIGHT failure: once any durable row
+        # disagrees with what this run would write, the sweeps have already
+        # diverged, and writing the remaining cases would merge rows from
+        # different approval snapshots under one run id. Nothing further is
+        # written until staff reconcile.
+        if conflicts:
+            return (
+                f"STORE CONFLICT: durable rows for {', '.join(conflicts)} "
+                "carry different content than this run would write; staff "
+                "must reconcile the escalation store. Nothing further was "
+                "committed."
+            )
         # Approval binding: once an attorney has approved, ONLY the cases in
         # the approval snapshot may be committed under it. Anything the
         # queue has since minted needs a fresh interrupt, never a ride on an
@@ -655,13 +667,6 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 )
             to_write = [d for d in to_write if d.case_id in approved]
         if not to_write:
-            if conflicts:
-                return (
-                    f"STORE CONFLICT: durable rows for {', '.join(conflicts)} "
-                    "carry different content than this run would write; staff "
-                    "must reconcile the escalation store. Nothing further was "
-                    "committed."
-                )
             ctx.audit.append(
                 AuditEvent(
                     kind="commit_refused",
@@ -731,10 +736,7 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 run_id=ctx.run_id,
             )
         )
-        note = (
-            f" STORE CONFLICT on {', '.join(conflicts)}: staff must reconcile." if conflicts else ""
-        )
-        return f"Committed {len(newly)} escalation(s): {', '.join(newly)}.{note}"
+        return f"Committed {len(newly)} escalation(s): {', '.join(newly)}."
 
     @tool
     def write_packet_memo(case_id: str, notes: str = "") -> str:

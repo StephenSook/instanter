@@ -1534,3 +1534,149 @@ def test_oversized_memo_is_refused_never_sliced(tmp_path: Path) -> None:
     assert "A-1" not in ctx.packet_memos  # nothing sliced, nothing recorded
     kinds = audit_kinds(ctx)
     assert "memo_rejected" in kinds
+
+
+# --- Round-13 reproducers -----------------------------------------------------
+
+
+def test_oversized_case_id_is_a_refusal_not_a_sweep_abort(tmp_path: Path) -> None:
+    """Round-13 reproducer: a sixty-five-character case id passed intake
+    (string check only) and detonated in the downstream Pydantic model
+    with no RunReport, no refusal, and no commits for anyone."""
+    intake = _write_intake(
+        tmp_path,
+        [
+            {
+                "case_id": "X" * 65,
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+            {
+                "case_id": "GOOD-1",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+        ],
+    )
+    store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
+    ctx = RunContext(
+        run_date=RUN_DATE,
+        attorney_capacity=2,
+        store=store,
+        audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+    )
+    report = run_deterministic(ctx)
+    assert report.committed == ("GOOD-1",)  # the valid case still swept
+    assert len(report.refused) == 1
+    assert not report.succeeded
+
+
+def test_conflict_aborts_before_any_further_write(tmp_path: Path) -> None:
+    """Round-13 reproducer: with conflicting durable A and missing B, the
+    commit previously wrote B anyway ('Committed 1 ... STORE CONFLICT on
+    A'), merging rows from different snapshots after divergence was
+    already detected. Any conflict is now a preflight failure."""
+    ctx = make_ctx(
+        tmp_path,
+        [good_record("A-1", service_date="2026-08-30"), good_record("B-2", "2026-08-31")],
+        capacity=2,
+    )
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    for decision in ctx.interrupt_candidates:
+        tools["submit_escalation_rationale"](
+            case_id=decision.case_id,
+            disposition=decision.level.value,
+            explanation="Deadline has passed with no answer on file.",
+            confidence=0.9,
+        )
+    # A stale writer landed a divergent row for A under this run id.
+    ctx.store.record_escalation(
+        EscalationRecord(
+            case_id="A-1",
+            disposition="interrupt",
+            rank=99,
+            factors=("stale",),
+            rationale="An old rationale from a divergent writer.",
+            confidence=0.5,
+            run_id=ctx.run_id,
+        )
+    )
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, tuple(d.case_id for d in ctx.interrupt_candidates))
+    outcome = tools["commit_escalations"]()
+
+    assert "STORE CONFLICT" in outcome
+    assert "Committed" not in outcome
+    rows = [json.loads(line) for line in (tmp_path / "escalations.jsonl").read_text().splitlines()]
+    assert [r["case_id"] for r in rows] == ["A-1"]  # B-2 was never written
+
+
+def test_torn_manifest_is_loud_and_scoped_to_its_run(tmp_path: Path) -> None:
+    """Round-13 reproducer: a torn manifest write previously wedged EVERY
+    future sweep (shared JSONL sidecar, unconditional parse). Manifests
+    are now one crash-atomic file per run: corruption is a loud, named
+    error scoped to its run id, and other runs are unaffected."""
+    import hashlib as _hashlib
+
+    from agent.store import RunManifest
+
+    store = JsonFileCaseStore(
+        intake_path=tmp_path / "unused.json",
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    manifests_dir = tmp_path / "escalations.jsonl.manifests"
+    manifests_dir.mkdir()
+    torn = manifests_dir / (_hashlib.sha256(b"evt-torn").hexdigest() + ".json")
+    torn.write_text('{"run_id":"evt-torn"')  # a crash mid-write
+
+    with pytest.raises(ValueError, match="corrupt"):
+        store.reserve_run_manifest(
+            RunManifest(
+                run_id="evt-torn",
+                inputs_digest="d",
+                candidates=("A-1",),
+                run_date="2026-09-09",
+                capacity=2,
+            )
+        )
+    healthy = store.reserve_run_manifest(
+        RunManifest(
+            run_id="evt-healthy",
+            inputs_digest="d",
+            candidates=("A-1",),
+            run_date="2026-09-09",
+            capacity=2,
+        )
+    )
+    assert healthy.run_id == "evt-healthy"  # other runs unaffected
+
+
+def test_enormous_attorney_response_is_digest_anchored(tmp_path: Path) -> None:
+    """Round-13 reproducer: a 666-character deferral was silently cut to
+    400 characters with no way to reconstruct the decision. Bounded
+    responses are stored verbatim; enormous ones carry an excerpt plus the
+    full content's digest and length."""
+    import hashlib as _hashlib
+
+    ctx = seed_ctx(tmp_path)
+    huge_reason = "defer: " + ("the attorney explained at length " * 90)
+    assert len(huge_reason) > 2000
+    run_deterministic(ctx, attorney_response=huge_reason)
+
+    events = ctx.audit.read_all()  # type: ignore[attr-defined]
+    decisions = [e for e in events if e["kind"] == "attorney_decision"]
+    payload = decisions[-1]["payload"]
+    assert payload["detail_length"] == len(huge_reason.strip())
+    assert payload["detail_sha256"] == _hashlib.sha256(huge_reason.strip().encode()).hexdigest()
+    assert payload["detail_excerpt"] == huge_reason.strip()[:2000]
+
+    second_dir = tmp_path / "second"
+    second_dir.mkdir()
+    ctx2 = seed_ctx(second_dir)
+    run_deterministic(ctx2, attorney_response="defer: attorney unavailable today")
+    events2 = ctx2.audit.read_all()  # type: ignore[attr-defined]
+    short = [e for e in events2 if e["kind"] == "attorney_decision"][-1]["payload"]
+    assert short["detail"] == "defer: attorney unavailable today"
