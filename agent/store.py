@@ -154,7 +154,22 @@ class JsonFileCaseStore:
                         existing.get("run_id") == escalation.run_id
                         and existing.get("case_id") == escalation.case_id
                     ):
-                        return  # already durably recorded: idempotent no-op
+                        # Idempotent ONLY for the identical payload: a
+                        # duplicate key carrying different content means two
+                        # writers disagree about what the attorney approved,
+                        # and silently keeping either one would falsify the
+                        # record. Conflict is loud.
+                        stored = {k: v for k, v in existing.items() if k != "recorded_at"}
+                        offered = {k: v for k, v in payload.items() if k != "recorded_at"}
+                        offered = json.loads(json.dumps(offered))  # normalize types
+                        if stored == offered:
+                            return  # already durably recorded: idempotent no-op
+                        raise ValueError(
+                            f"idempotency conflict for run {escalation.run_id} "
+                            f"case {escalation.case_id}: a row with the same key "
+                            "but different content is already durably recorded; "
+                            "staff must reconcile the escalation store"
+                        )
                 handle.seek(0, os.SEEK_END)
                 handle.write(json.dumps(payload) + "\n")
                 handle.flush()

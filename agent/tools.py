@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from strands import tool
 
 from agent.audit import AuditEvent
+from agent.hooks import presented_content_digest
 from agent.models import LOW_CONFIDENCE_THRESHOLD, EscalationRationale, ExtractedObservations
 from agent.run_context import RunContext
 from agent.store import EscalationRecord, IntakeParseError, to_case_input
@@ -319,6 +320,51 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         action pauses for a licensed attorney's approval before executing;
         the attorney may approve or defer the whole set.
         """
+        # Fail closed BEFORE anything touches the store: writes require an
+        # attorney approval bound to a nonempty snapshot with a verifiable
+        # content digest. This holds even if the approval hook were unwired
+        # (a green unit suite beside dead runtime wiring must still not be
+        # able to commit).
+        if ctx.attorney_action != "approved":
+            ctx.audit.append(
+                AuditEvent(
+                    kind="commit_refused",
+                    case_id=None,
+                    payload={"reason": "not_approved", "attorney_action": ctx.attorney_action},
+                    run_id=ctx.run_id,
+                )
+            )
+            return (
+                "NOT APPROVED: committing escalations requires an attorney "
+                "approval; none is recorded for this run."
+            )
+        if not ctx.approved_case_ids or ctx.approval_digest is None:
+            ctx.audit.append(
+                AuditEvent(
+                    kind="commit_refused",
+                    case_id=None,
+                    payload={"reason": "approval_unbound"},
+                    run_id=ctx.run_id,
+                )
+            )
+            return (
+                "APPROVAL UNBOUND: the recorded approval carries no candidate "
+                "snapshot or content digest; a fresh attorney approval is "
+                "required before anything can be committed."
+            )
+        if presented_content_digest(ctx, ctx.approved_case_ids) != ctx.approval_digest:
+            ctx.audit.append(
+                AuditEvent(
+                    kind="commit_refused",
+                    case_id=None,
+                    payload={"reason": "approved_content_changed"},
+                    run_id=ctx.run_id,
+                )
+            )
+            return (
+                "APPROVED CONTENT CHANGED: the queue or a rationale differs "
+                "from what the attorney approved; a fresh approval is required."
+            )
         missing = [d.case_id for d in ctx.interrupt_candidates if d.case_id not in ctx.rationales]
         if missing:
             ctx.audit.append(

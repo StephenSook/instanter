@@ -89,13 +89,14 @@ def _apply_attorney_decision(ctx: RunContext, tools: dict[str, Any], response: s
     writer agent calls: one code path for store writes, partial-failure
     handling, and audit events. Parsing is the same strict fail-closed
     parse the approval hook uses."""
-    from agent.hooks import parse_attorney_response
+    from agent.hooks import bind_approval, parse_attorney_response
 
     action, reason = parse_attorney_response(response)
     ctx.attorney_action = action
     if action == "approved" and ctx.approved_case_ids is None:
-        # Bind the approval to the presented candidates, same as the hook.
-        ctx.approved_case_ids = tuple(d.case_id for d in ctx.interrupt_candidates)
+        # Bind the approval to the presented candidates, same as the hook:
+        # snapshot ids plus the presented-content digest.
+        bind_approval(ctx, tuple(d.case_id for d in ctx.interrupt_candidates))
     ctx.audit.append(
         AuditEvent(
             kind="attorney_decision",
