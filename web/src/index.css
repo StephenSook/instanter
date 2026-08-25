@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+/* Fonts load from index.html with preconnect: Tailwind v4 inlines its own
+   @import, which invalidates any @import following it here. All faces are
+   OFL (IBM Plex Mono, IBM Plex Serif, Anton); the reference site's Klim
+   faces are commercial and are deliberately NOT used. */
+
+@theme {
+  /* Ground and paper: a dark archive lit by cream documents. */
+  --color-ground: #141414;
+  --color-ground-soft: #1d1d1d;
+  --color-paper: #faf6f0;
+  --color-paper-edge: #e8e0d4;
+  --color-ink: #191919;
+  --color-ink-soft: #6b6b6b;
+
+  /* Urgency bands ARE the folder colors. One band, one hue, everywhere:
+     queue tab, folder body, packet punch-holes, countdown chip. */
+  --color-l1: #c2352b; /* interrupt now */
+  --color-l2: #cf7a1c; /* surface today */
+  --color-l3: #2f5fb3; /* monitor */
+  --color-l0: #55665d; /* hold: answer already filed */
+
+  --color-stamp: #b3271e;
+  --color-flag: #e8c547;
+
+  --font-display: "Anton", "Arial Narrow", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-serif: "IBM Plex Serif", Georgia, serif;
+
+  --ease-folder: cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+:root {
+  color-scheme: dark;
+  font-size: 15px;
+}
+@media (min-width: 1280px) {
+  :root { font-size: 17px; }
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--color-ground);
+  color: var(--color-paper);
+  font-family: var(--font-mono);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Paper grain: generated here, not lifted. A faint dot lattice plus a
+   soft vignette reads as fibre under text without costing an image. */
+.paper-grain {
+  background-image:
+    radial-gradient(circle at 1px 1px, rgb(25 25 25 / 0.045) 1px, transparent 0),
+    radial-gradient(ellipse at 50% 0%, rgb(255 255 255 / 0.5), transparent 70%);
+  background-size: 4px 4px, 100% 100%;
+}
+
+.display {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  line-height: 0.84;
+  letter-spacing: 0.01em;
+}
+
+/* The folder tab: a die-cut trapezoid, not a rectangle with rounded
+   corners. Drawn with a clip-path so it stays crisp at any size. */
+.tab-cut {
+  clip-path: polygon(0 100%, 6% 0, 94% 0, 100% 100%);
+}
+
+.rail-tab {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+/* Focus as a paperclip outline, per the brief's accessibility layer. */
+:where(a, button, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-flag);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

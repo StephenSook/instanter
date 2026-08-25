@@ -58,3 +58,11 @@ test-results/
 
 # evals transient per-case run outputs (latest.json IS tracked)
 evals/results/runs/
+
+# web build artifacts
+web/node_modules/
+web/dist/
+web/.playwright-mcp/
+
+# local run output and screenshots
+out/

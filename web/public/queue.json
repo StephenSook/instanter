@@ -1,0 +1,2692 @@
+{
+ "generated_by": "scripts/export_queue.py (live sweep)",
+ "mode": "live",
+ "run_date": "2026-09-09",
+ "attorney_capacity": 2,
+ "label": "EXAMPLE DATA: every case record in this file is synthetic",
+ "report": {
+  "run_id": "run-782a5c350fa1",
+  "mode": "live",
+  "total_cases": 48,
+  "interrupts": [
+   "26ED00101",
+   "26ED00102"
+  ],
+  "committed": [
+   "26ED00101",
+   "26ED00102"
+  ],
+  "attorney_action": "approved",
+  "audit_path": "",
+  "backstop_used": false,
+  "model_error": "",
+  "failures": [],
+  "refused": [],
+  "missing_memos": []
+ },
+ "succeeded": true,
+ "cases": [
+  {
+   "case_id": "26ED00101",
+   "level": "interrupt",
+   "floor_level": "interrupt",
+   "rank": 1,
+   "days_remaining": -1,
+   "interrupt_now": true,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-08 is -1 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-08",
+   "computed_deadline": "2026-09-08",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-01",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-08",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-08",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-01",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 001 (EXAMPLE)",
+   "property_address": "101 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": "Effective deadline 2026-09-08. -1 day(s) remaining at the run date 2026-09-09; queue rank 1. Writer explanation: The deadline has passed.",
+   "packet_memo": "Effective deadline 2026-09-08. -1 day(s) remaining at the run date 2026-09-09; queue rank 1. Service method recorded as personal. Staff verify the intake facts against the tenant record."
+  },
+  {
+   "case_id": "26ED00102",
+   "level": "interrupt",
+   "floor_level": "interrupt",
+   "rank": 2,
+   "days_remaining": 0,
+   "interrupt_now": true,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-09 is 0 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-09",
+   "computed_deadline": "2026-09-09",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-02",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-09",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-09",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-02",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 002 (EXAMPLE)",
+   "property_address": "102 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": "Effective deadline 2026-09-09. 0 day(s) remaining at the run date 2026-09-09; queue rank 2. Writer explanation: The deadline has arrived.",
+   "packet_memo": "Effective deadline 2026-09-09. 0 day(s) remaining at the run date 2026-09-09; queue rank 2. Service method recorded as personal. Staff verify the intake facts against the tenant record."
+  },
+  {
+   "case_id": "26ED00103",
+   "level": "surface_today",
+   "floor_level": "interrupt",
+   "rank": 3,
+   "days_remaining": 1,
+   "interrupt_now": false,
+   "held_reason": "held: attorney capacity is 2 this run and 2 more-severe case(s) hold the slots; ranked 3 overall",
+   "raised_by": [
+    "service_method_risk"
+   ],
+   "factors": [
+    "effective deadline 2026-09-10 is 1 day(s) away",
+    "tack-and-mail service risk: default possession exposure even without actual notice (O.C.G.A. 44-7-51(c) family flags present)",
+    "notes report possibly defective service; staff must confirm today"
+   ],
+   "flags": [
+    {
+     "code": "tack_and_mail_review",
+     "reason": "Service by tack and mail: default judgment for possession is possible, but no money judgment absent an answer or appearance (O.C.G.A. 44-7-51(c)).",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-10",
+   "computed_deadline": "2026-09-10",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-03",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-10",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-10",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-03",
+   "service_method": "tack_and_mail",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 003 (EXAMPLE)",
+   "property_address": "103 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "Tenant says papers were taped to the front door last week; no mail copy seen yet.",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00108",
+   "level": "surface_today",
+   "floor_level": "interrupt",
+   "rank": 4,
+   "days_remaining": 1,
+   "interrupt_now": false,
+   "held_reason": "held: attorney capacity is 2 this run and 2 more-severe case(s) hold the slots; ranked 4 overall",
+   "raised_by": [
+    "unverified_clock"
+   ],
+   "factors": [
+    "effective deadline 2026-09-10 is 1 day(s) away",
+    "the deadline basis is unverified; attorney confirmation required",
+    "engine flag unknown_service_method: Service method not captured at intake; method-specific risk (tack-and-mail default exposure) cannot be assessed.",
+    "notes describe posted service the intake fields do not record; the service method needs staff confirmation",
+    "the notes analysis flagged uncertain or conflicting facts for human confirmation",
+    "the notes analysis recorded open questions a staff member must answer"
+   ],
+   "flags": [
+    {
+     "code": "service_date_missing",
+     "reason": "Service date unknown or disputed; refusing to compute a binding deadline. If the summons states a last day to answer, that date controls for the tenant.",
+     "day": null
+    },
+    {
+     "code": "unknown_service_method",
+     "reason": "Service method not captured at intake; method-specific risk (tack-and-mail default exposure) cannot be assessed.",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-10",
+   "computed_deadline": null,
+   "deadline_basis": "summons_only_unverified",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [],
+   "service_date": null,
+   "service_method": "unknown",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 008 (EXAMPLE)",
+   "property_address": "108 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "Papers may belong to the unit next door; names do not match exactly.",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00105",
+   "level": "surface_today",
+   "floor_level": "surface_today",
+   "rank": 5,
+   "days_remaining": 3,
+   "interrupt_now": false,
+   "held_reason": "held: attorney capacity is 2 this run and 2 more-severe case(s) hold the slots; ranked 5 overall",
+   "raised_by": [
+    "calendar_move_risk"
+   ],
+   "factors": [
+    "effective deadline 2026-09-12 is 3 day(s) away",
+    "a calendar divergence or summons conflict likely invalidates the tenant's own understanding of the deadline",
+    "notes report a hearing or deadline change; the tenant's understanding of the clock may be wrong",
+    "the notes analysis flagged uncertain or conflicting facts for human confirmation",
+    "the notes analysis recorded open questions a staff member must answer"
+   ],
+   "flags": [
+    {
+     "code": "summons_date_conflict",
+     "reason": "Summons states 2026-09-12 but the statutory computation gives 2026-09-11. The summons-stated date controls for the tenant (O.C.G.A. 44-7-51(b)); the discrepancy needs attorney review.",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-12",
+   "computed_deadline": "2026-09-11",
+   "deadline_basis": "summons_controls",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-04",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-11",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-11",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-04",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 005 (EXAMPLE)",
+   "property_address": "105 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "Tenant says the hearing date on the letter looks different from the court text message.",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00109",
+   "level": "surface_today",
+   "floor_level": "surface_today",
+   "rank": 6,
+   "days_remaining": null,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "no reliable deadline could be established; attorney must resolve intake",
+    "engine flag unknown_service_method: Service method not captured at intake; method-specific risk (tack-and-mail default exposure) cannot be assessed.",
+    "notes report a hearing or deadline change; the tenant's understanding of the clock may be wrong"
+   ],
+   "flags": [
+    {
+     "code": "service_date_missing",
+     "reason": "Service date unknown or disputed; refusing to compute a binding deadline. If the summons states a last day to answer, that date controls for the tenant.",
+     "day": null
+    },
+    {
+     "code": "unknown_service_method",
+     "reason": "Service method not captured at intake; method-specific risk (tack-and-mail default exposure) cannot be assessed.",
+     "day": null
+    }
+   ],
+   "effective_deadline": null,
+   "computed_deadline": null,
+   "deadline_basis": "none",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [],
+   "service_date": null,
+   "service_method": "unknown",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 009 (EXAMPLE)",
+   "property_address": "109 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "Interpreter needed; tenant primarily speaks Spanish and is unsure what the deadline is.",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00104",
+   "level": "surface_today",
+   "floor_level": "surface_today",
+   "rank": 7,
+   "days_remaining": 2,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-11 is 2 day(s) away",
+    "notes describe posted service the intake fields do not record; the service method needs staff confirmation"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-11",
+   "computed_deadline": "2026-09-11",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-04",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-11",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-11",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-04",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 004 (EXAMPLE)",
+   "property_address": "104 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "Neighbor accepted the papers; tenant unsure which day they actually arrived.",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00106",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 8,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "service_method_risk"
+   ],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away",
+    "tack-and-mail service risk: default possession exposure even without actual notice (O.C.G.A. 44-7-51(c) family flags present)",
+    "notes report possibly defective service; staff must confirm today"
+   ],
+   "flags": [
+    {
+     "code": "tack_and_mail_review",
+     "reason": "Service by tack and mail: default judgment for possession is possible, but no money judgment absent an answer or appearance (O.C.G.A. 44-7-51(c)).",
+     "day": null
+    },
+    {
+     "code": "tack_and_mail_date_split",
+     "reason": "Posting date 2026-09-05 and mailing date 2026-09-06 differ; the entered service date is the starting point for computation, and an attorney must confirm which date starts the clock.",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-05",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-12",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-12",
+     "label": "Saturday; roll forward"
+    },
+    {
+     "day": "2026-09-13",
+     "label": "Sunday; roll forward"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-05",
+   "service_method": "tack_and_mail",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 006 (EXAMPLE)",
+   "property_address": "106 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "Tenant found the summons in the mailbox, envelope postmarked three days after the date on it.",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00107",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 9,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "service_method_risk"
+   ],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away",
+    "tack-and-mail service risk: default possession exposure even without actual notice (O.C.G.A. 44-7-51(c) family flags present)",
+    "notes report possibly defective service; staff must confirm today"
+   ],
+   "flags": [
+    {
+     "code": "tack_and_mail_review",
+     "reason": "Service by tack and mail: default judgment for possession is possible, but no money judgment absent an answer or appearance (O.C.G.A. 44-7-51(c)).",
+     "day": null
+    },
+    {
+     "code": "tack_and_mail_service_mismatch",
+     "reason": "Tack-and-mail component date 2026-09-04 does not match the entered service date 2026-09-06. The entered service date is the starting point for computation, and an attorney must confirm which date starts the clock.",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-06",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-13",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-13",
+     "label": "Sunday; roll forward"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-06",
+   "service_method": "tack_and_mail",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 007 (EXAMPLE)",
+   "property_address": "107 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "Tenant was in the hospital when papers were posted; daughter took photos of the door.",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00110",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 10,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "engine_flag_amended_affidavit"
+   ],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away",
+    "engine flag amended_affidavit: Second or amended dispossessory affidavit on file; the operative service event may have reset. Attorney must confirm which service date controls.",
+    "notes describe posted service the intake fields do not record; the service method needs staff confirmation",
+    "the notes analysis flagged uncertain or conflicting facts for human confirmation",
+    "the notes analysis recorded open questions a staff member must answer"
+   ],
+   "flags": [
+    {
+     "code": "amended_affidavit",
+     "reason": "Second or amended dispossessory affidavit on file; the operative service event may have reset. Attorney must confirm which service date controls.",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 010 (EXAMPLE)",
+   "property_address": "110 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "Second set of papers arrived this week that looks almost the same as the first set.",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00117",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 11,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "defective_service_mention"
+   ],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away",
+    "notes report possibly defective service; staff must confirm today"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 017 (EXAMPLE)",
+   "property_address": "117 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "Tenant says the amount on the affidavit includes fees the lease never mentions.",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00138",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 12,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "service_method_risk"
+   ],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away",
+    "tack-and-mail service risk: default possession exposure even without actual notice (O.C.G.A. 44-7-51(c) family flags present)"
+   ],
+   "flags": [
+    {
+     "code": "tack_and_mail_review",
+     "reason": "Service by tack and mail: default judgment for possession is possible, but no money judgment absent an answer or appearance (O.C.G.A. 44-7-51(c)).",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "tack_and_mail",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 038 (EXAMPLE)",
+   "property_address": "138 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00144",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 13,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "service_method_risk"
+   ],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away",
+    "tack-and-mail service risk: default possession exposure even without actual notice (O.C.G.A. 44-7-51(c) family flags present)"
+   ],
+   "flags": [
+    {
+     "code": "tack_and_mail_review",
+     "reason": "Service by tack and mail: default judgment for possession is possible, but no money judgment absent an answer or appearance (O.C.G.A. 44-7-51(c)).",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "tack_and_mail",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 044 (EXAMPLE)",
+   "property_address": "144 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00115",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 14,
+   "days_remaining": 6,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "needs_human_confirmation"
+   ],
+   "factors": [
+    "effective deadline 2026-09-15 is 6 day(s) away",
+    "the notes analysis flagged uncertain or conflicting facts for human confirmation",
+    "the notes analysis recorded open questions a staff member must answer"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-15",
+   "computed_deadline": "2026-09-15",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-08",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-08",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 015 (EXAMPLE)",
+   "property_address": "115 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "Landlord texted that the case is dropped, but nothing in writing.",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00128",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 15,
+   "days_remaining": 6,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "service_method_risk"
+   ],
+   "factors": [
+    "effective deadline 2026-09-15 is 6 day(s) away",
+    "tack-and-mail service risk: default possession exposure even without actual notice (O.C.G.A. 44-7-51(c) family flags present)"
+   ],
+   "flags": [
+    {
+     "code": "tack_and_mail_review",
+     "reason": "Service by tack and mail: default judgment for possession is possible, but no money judgment absent an answer or appearance (O.C.G.A. 44-7-51(c)).",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-15",
+   "computed_deadline": "2026-09-15",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-08",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-08",
+   "service_method": "tack_and_mail",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 028 (EXAMPLE)",
+   "property_address": "128 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00134",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 16,
+   "days_remaining": 6,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "service_method_risk"
+   ],
+   "factors": [
+    "effective deadline 2026-09-15 is 6 day(s) away",
+    "tack-and-mail service risk: default possession exposure even without actual notice (O.C.G.A. 44-7-51(c) family flags present)"
+   ],
+   "flags": [
+    {
+     "code": "tack_and_mail_review",
+     "reason": "Service by tack and mail: default judgment for possession is possible, but no money judgment absent an answer or appearance (O.C.G.A. 44-7-51(c)).",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-15",
+   "computed_deadline": "2026-09-15",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-08",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-08",
+   "service_method": "tack_and_mail",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 034 (EXAMPLE)",
+   "property_address": "134 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00140",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 17,
+   "days_remaining": 6,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "service_method_risk"
+   ],
+   "factors": [
+    "effective deadline 2026-09-15 is 6 day(s) away",
+    "tack-and-mail service risk: default possession exposure even without actual notice (O.C.G.A. 44-7-51(c) family flags present)"
+   ],
+   "flags": [
+    {
+     "code": "tack_and_mail_review",
+     "reason": "Service by tack and mail: default judgment for possession is possible, but no money judgment absent an answer or appearance (O.C.G.A. 44-7-51(c)).",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-15",
+   "computed_deadline": "2026-09-15",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-08",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-08",
+   "service_method": "tack_and_mail",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 040 (EXAMPLE)",
+   "property_address": "140 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00124",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 18,
+   "days_remaining": 7,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "service_method_risk"
+   ],
+   "factors": [
+    "effective deadline 2026-09-16 is 7 day(s) away",
+    "tack-and-mail service risk: default possession exposure even without actual notice (O.C.G.A. 44-7-51(c) family flags present)"
+   ],
+   "flags": [
+    {
+     "code": "tack_and_mail_review",
+     "reason": "Service by tack and mail: default judgment for possession is possible, but no money judgment absent an answer or appearance (O.C.G.A. 44-7-51(c)).",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-16",
+   "computed_deadline": "2026-09-16",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-09",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-09",
+   "service_method": "tack_and_mail",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 024 (EXAMPLE)",
+   "property_address": "124 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00130",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 19,
+   "days_remaining": 7,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "service_method_risk"
+   ],
+   "factors": [
+    "effective deadline 2026-09-16 is 7 day(s) away",
+    "tack-and-mail service risk: default possession exposure even without actual notice (O.C.G.A. 44-7-51(c) family flags present)"
+   ],
+   "flags": [
+    {
+     "code": "tack_and_mail_review",
+     "reason": "Service by tack and mail: default judgment for possession is possible, but no money judgment absent an answer or appearance (O.C.G.A. 44-7-51(c)).",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-16",
+   "computed_deadline": "2026-09-16",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-09",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-09",
+   "service_method": "tack_and_mail",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 030 (EXAMPLE)",
+   "property_address": "130 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00148",
+   "level": "surface_today",
+   "floor_level": "monitor",
+   "rank": 20,
+   "days_remaining": 7,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [
+    "service_method_risk"
+   ],
+   "factors": [
+    "effective deadline 2026-09-16 is 7 day(s) away",
+    "tack-and-mail service risk: default possession exposure even without actual notice (O.C.G.A. 44-7-51(c) family flags present)"
+   ],
+   "flags": [
+    {
+     "code": "tack_and_mail_review",
+     "reason": "Service by tack and mail: default judgment for possession is possible, but no money judgment absent an answer or appearance (O.C.G.A. 44-7-51(c)).",
+     "day": null
+    }
+   ],
+   "effective_deadline": "2026-09-16",
+   "computed_deadline": "2026-09-16",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-09",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-09",
+   "service_method": "tack_and_mail",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 048 (EXAMPLE)",
+   "property_address": "148 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00113",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 21,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 013 (EXAMPLE)",
+   "property_address": "113 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "Tenant plans to pay everything owed this week and wants to know if that ends the case.",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00116",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 22,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 016 (EXAMPLE)",
+   "property_address": "116 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00120",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 23,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 020 (EXAMPLE)",
+   "property_address": "120 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00123",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 24,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 023 (EXAMPLE)",
+   "property_address": "123 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00126",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 25,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 026 (EXAMPLE)",
+   "property_address": "126 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00129",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 26,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 029 (EXAMPLE)",
+   "property_address": "129 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00132",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 27,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 032 (EXAMPLE)",
+   "property_address": "132 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00135",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 28,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 035 (EXAMPLE)",
+   "property_address": "135 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00141",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 29,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 041 (EXAMPLE)",
+   "property_address": "141 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00147",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 30,
+   "days_remaining": 5,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-14 is 5 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-07",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-07",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 047 (EXAMPLE)",
+   "property_address": "147 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00114",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 31,
+   "days_remaining": 6,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-15 is 6 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-15",
+   "computed_deadline": "2026-09-15",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-08",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-08",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 014 (EXAMPLE)",
+   "property_address": "114 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00119",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 32,
+   "days_remaining": 6,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-15 is 6 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-15",
+   "computed_deadline": "2026-09-15",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-08",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-08",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 019 (EXAMPLE)",
+   "property_address": "119 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00122",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 33,
+   "days_remaining": 6,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-15 is 6 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-15",
+   "computed_deadline": "2026-09-15",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-08",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-08",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 022 (EXAMPLE)",
+   "property_address": "122 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00125",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 34,
+   "days_remaining": 6,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-15 is 6 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-15",
+   "computed_deadline": "2026-09-15",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-08",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-08",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 025 (EXAMPLE)",
+   "property_address": "125 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00131",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 35,
+   "days_remaining": 6,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-15 is 6 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-15",
+   "computed_deadline": "2026-09-15",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-08",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-08",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 031 (EXAMPLE)",
+   "property_address": "131 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00137",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 36,
+   "days_remaining": 6,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-15 is 6 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-15",
+   "computed_deadline": "2026-09-15",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-08",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-08",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 037 (EXAMPLE)",
+   "property_address": "137 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00143",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 37,
+   "days_remaining": 6,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-15 is 6 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-15",
+   "computed_deadline": "2026-09-15",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-08",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-08",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 043 (EXAMPLE)",
+   "property_address": "143 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00146",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 38,
+   "days_remaining": 6,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-15 is 6 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-15",
+   "computed_deadline": "2026-09-15",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-08",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-15",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-08",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 046 (EXAMPLE)",
+   "property_address": "146 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00118",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 39,
+   "days_remaining": 7,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-16 is 7 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-16",
+   "computed_deadline": "2026-09-16",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-09",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-09",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 018 (EXAMPLE)",
+   "property_address": "118 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00121",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 40,
+   "days_remaining": 7,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-16 is 7 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-16",
+   "computed_deadline": "2026-09-16",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-09",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-09",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 021 (EXAMPLE)",
+   "property_address": "121 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00127",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 41,
+   "days_remaining": 7,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-16 is 7 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-16",
+   "computed_deadline": "2026-09-16",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-09",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-09",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 027 (EXAMPLE)",
+   "property_address": "127 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00133",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 42,
+   "days_remaining": 7,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-16 is 7 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-16",
+   "computed_deadline": "2026-09-16",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-09",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-09",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 033 (EXAMPLE)",
+   "property_address": "133 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00136",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 43,
+   "days_remaining": 7,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-16 is 7 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-16",
+   "computed_deadline": "2026-09-16",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-09",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-09",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 036 (EXAMPLE)",
+   "property_address": "136 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00139",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 44,
+   "days_remaining": 7,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-16 is 7 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-16",
+   "computed_deadline": "2026-09-16",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-09",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-09",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 039 (EXAMPLE)",
+   "property_address": "139 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00142",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 45,
+   "days_remaining": 7,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-16 is 7 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-16",
+   "computed_deadline": "2026-09-16",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-09",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-09",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 042 (EXAMPLE)",
+   "property_address": "142 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00145",
+   "level": "monitor",
+   "floor_level": "monitor",
+   "rank": 46,
+   "days_remaining": 7,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "effective deadline 2026-09-16 is 7 day(s) away"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-16",
+   "computed_deadline": "2026-09-16",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-09",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-16",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-09",
+   "service_method": "personal",
+   "answer_filed": false,
+   "tenant_display_name": "Tenant 045 (EXAMPLE)",
+   "property_address": "145 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00111",
+   "level": "hold",
+   "floor_level": "hold",
+   "rank": 47,
+   "days_remaining": null,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "answer already filed; no default exposure on this docket entry"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-10",
+   "computed_deadline": "2026-09-10",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-03",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-10",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-10",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-03",
+   "service_method": "personal",
+   "answer_filed": true,
+   "tenant_display_name": "Tenant 011 (EXAMPLE)",
+   "property_address": "111 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "Tenant already mailed an answer, has the certified mail receipt in hand.",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  },
+  {
+   "case_id": "26ED00112",
+   "level": "hold",
+   "floor_level": "hold",
+   "rank": 48,
+   "days_remaining": null,
+   "interrupt_now": false,
+   "held_reason": null,
+   "raised_by": [],
+   "factors": [
+    "answer already filed; no default exposure on this docket entry"
+   ],
+   "flags": [],
+   "effective_deadline": "2026-09-14",
+   "computed_deadline": "2026-09-14",
+   "deadline_basis": "computed",
+   "citation": "O.C.G.A. 44-7-51(b); O.C.G.A. 1-3-1(d)(3); O.C.G.A. 1-4-1",
+   "court_reopens_on": null,
+   "trace": [
+    {
+     "day": "2026-09-06",
+     "label": "day of actual service; not counted (day 0)"
+    },
+    {
+     "day": "2026-09-13",
+     "label": "day 7 (calendar days; intermediates count)"
+    },
+    {
+     "day": "2026-09-13",
+     "label": "Sunday; roll forward"
+    },
+    {
+     "day": "2026-09-14",
+     "label": "last day to answer (statutory computation)"
+    }
+   ],
+   "service_date": "2026-09-06",
+   "service_method": "personal",
+   "answer_filed": true,
+   "tenant_display_name": "Tenant 012 (EXAMPLE)",
+   "property_address": "112 Example Way SW, Atlanta, GA (SYNTHETIC)",
+   "notes": "",
+   "label": "EXAMPLE DATA",
+   "rationale": null,
+   "packet_memo": null
+  }
+ ],
+ "audit": [
+  {
+   "seq": 1,
+   "kind": "run_started",
+   "case_id": null
+  },
+  {
+   "seq": 2,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 3,
+   "kind": "observation_recorded",
+   "case_id": "26ED00103"
+  },
+  {
+   "seq": 4,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 5,
+   "kind": "observation_recorded",
+   "case_id": "26ED00104"
+  },
+  {
+   "seq": 6,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 7,
+   "kind": "observation_recorded",
+   "case_id": "26ED00105"
+  },
+  {
+   "seq": 8,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 9,
+   "kind": "observation_recorded",
+   "case_id": "26ED00106"
+  },
+  {
+   "seq": 10,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 11,
+   "kind": "observation_recorded",
+   "case_id": "26ED00107"
+  },
+  {
+   "seq": 12,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 13,
+   "kind": "observation_recorded",
+   "case_id": "26ED00108"
+  },
+  {
+   "seq": 14,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 15,
+   "kind": "observation_recorded",
+   "case_id": "26ED00109"
+  },
+  {
+   "seq": 16,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 17,
+   "kind": "observation_rejected",
+   "case_id": "26ED00110"
+  },
+  {
+   "seq": 18,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 19,
+   "kind": "observation_recorded",
+   "case_id": "26ED00111"
+  },
+  {
+   "seq": 20,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 21,
+   "kind": "observation_recorded",
+   "case_id": "26ED00113"
+  },
+  {
+   "seq": 22,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 23,
+   "kind": "observation_recorded",
+   "case_id": "26ED00115"
+  },
+  {
+   "seq": 24,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 25,
+   "kind": "observation_recorded",
+   "case_id": "26ED00117"
+  },
+  {
+   "seq": 26,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 27,
+   "kind": "observation_rejected",
+   "case_id": "26ED00110"
+  },
+  {
+   "seq": 28,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 29,
+   "kind": "observation_recorded",
+   "case_id": "26ED00110"
+  },
+  {
+   "seq": 30,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 31,
+   "kind": "deadline_computed",
+   "case_id": "26ED00101"
+  },
+  {
+   "seq": 32,
+   "kind": "deadline_computed",
+   "case_id": "26ED00102"
+  },
+  {
+   "seq": 33,
+   "kind": "deadline_computed",
+   "case_id": "26ED00103"
+  },
+  {
+   "seq": 34,
+   "kind": "deadline_computed",
+   "case_id": "26ED00104"
+  },
+  {
+   "seq": 35,
+   "kind": "deadline_computed",
+   "case_id": "26ED00105"
+  },
+  {
+   "seq": 36,
+   "kind": "deadline_computed",
+   "case_id": "26ED00106"
+  },
+  {
+   "seq": 37,
+   "kind": "deadline_computed",
+   "case_id": "26ED00107"
+  },
+  {
+   "seq": 38,
+   "kind": "deadline_computed",
+   "case_id": "26ED00108"
+  },
+  {
+   "seq": 39,
+   "kind": "deadline_computed",
+   "case_id": "26ED00109"
+  },
+  {
+   "seq": 40,
+   "kind": "deadline_computed",
+   "case_id": "26ED00110"
+  },
+  {
+   "seq": 41,
+   "kind": "deadline_computed",
+   "case_id": "26ED00111"
+  },
+  {
+   "seq": 42,
+   "kind": "deadline_computed",
+   "case_id": "26ED00112"
+  },
+  {
+   "seq": 43,
+   "kind": "deadline_computed",
+   "case_id": "26ED00113"
+  },
+  {
+   "seq": 44,
+   "kind": "deadline_computed",
+   "case_id": "26ED00114"
+  },
+  {
+   "seq": 45,
+   "kind": "deadline_computed",
+   "case_id": "26ED00115"
+  },
+  {
+   "seq": 46,
+   "kind": "deadline_computed",
+   "case_id": "26ED00116"
+  },
+  {
+   "seq": 47,
+   "kind": "deadline_computed",
+   "case_id": "26ED00117"
+  },
+  {
+   "seq": 48,
+   "kind": "deadline_computed",
+   "case_id": "26ED00118"
+  },
+  {
+   "seq": 49,
+   "kind": "deadline_computed",
+   "case_id": "26ED00119"
+  },
+  {
+   "seq": 50,
+   "kind": "deadline_computed",
+   "case_id": "26ED00120"
+  },
+  {
+   "seq": 51,
+   "kind": "deadline_computed",
+   "case_id": "26ED00121"
+  },
+  {
+   "seq": 52,
+   "kind": "deadline_computed",
+   "case_id": "26ED00122"
+  },
+  {
+   "seq": 53,
+   "kind": "deadline_computed",
+   "case_id": "26ED00123"
+  },
+  {
+   "seq": 54,
+   "kind": "deadline_computed",
+   "case_id": "26ED00124"
+  },
+  {
+   "seq": 55,
+   "kind": "deadline_computed",
+   "case_id": "26ED00125"
+  },
+  {
+   "seq": 56,
+   "kind": "deadline_computed",
+   "case_id": "26ED00126"
+  },
+  {
+   "seq": 57,
+   "kind": "deadline_computed",
+   "case_id": "26ED00127"
+  },
+  {
+   "seq": 58,
+   "kind": "deadline_computed",
+   "case_id": "26ED00128"
+  },
+  {
+   "seq": 59,
+   "kind": "deadline_computed",
+   "case_id": "26ED00129"
+  },
+  {
+   "seq": 60,
+   "kind": "deadline_computed",
+   "case_id": "26ED00130"
+  },
+  {
+   "seq": 61,
+   "kind": "deadline_computed",
+   "case_id": "26ED00131"
+  },
+  {
+   "seq": 62,
+   "kind": "deadline_computed",
+   "case_id": "26ED00132"
+  },
+  {
+   "seq": 63,
+   "kind": "deadline_computed",
+   "case_id": "26ED00133"
+  },
+  {
+   "seq": 64,
+   "kind": "deadline_computed",
+   "case_id": "26ED00134"
+  },
+  {
+   "seq": 65,
+   "kind": "deadline_computed",
+   "case_id": "26ED00135"
+  },
+  {
+   "seq": 66,
+   "kind": "deadline_computed",
+   "case_id": "26ED00136"
+  },
+  {
+   "seq": 67,
+   "kind": "deadline_computed",
+   "case_id": "26ED00137"
+  },
+  {
+   "seq": 68,
+   "kind": "deadline_computed",
+   "case_id": "26ED00138"
+  },
+  {
+   "seq": 69,
+   "kind": "deadline_computed",
+   "case_id": "26ED00139"
+  },
+  {
+   "seq": 70,
+   "kind": "deadline_computed",
+   "case_id": "26ED00140"
+  },
+  {
+   "seq": 71,
+   "kind": "deadline_computed",
+   "case_id": "26ED00141"
+  },
+  {
+   "seq": 72,
+   "kind": "deadline_computed",
+   "case_id": "26ED00142"
+  },
+  {
+   "seq": 73,
+   "kind": "deadline_computed",
+   "case_id": "26ED00143"
+  },
+  {
+   "seq": 74,
+   "kind": "deadline_computed",
+   "case_id": "26ED00144"
+  },
+  {
+   "seq": 75,
+   "kind": "deadline_computed",
+   "case_id": "26ED00145"
+  },
+  {
+   "seq": 76,
+   "kind": "deadline_computed",
+   "case_id": "26ED00146"
+  },
+  {
+   "seq": 77,
+   "kind": "deadline_computed",
+   "case_id": "26ED00147"
+  },
+  {
+   "seq": 78,
+   "kind": "deadline_computed",
+   "case_id": "26ED00148"
+  },
+  {
+   "seq": 79,
+   "kind": "queue_ranked",
+   "case_id": null
+  },
+  {
+   "seq": 80,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 81,
+   "kind": "rationale_recorded",
+   "case_id": "26ED00101"
+  },
+  {
+   "seq": 82,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 83,
+   "kind": "rationale_rejected",
+   "case_id": "26ED00102"
+  },
+  {
+   "seq": 84,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 85,
+   "kind": "rationale_recorded",
+   "case_id": "26ED00102"
+  },
+  {
+   "seq": 86,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 87,
+   "kind": "attorney_decision",
+   "case_id": null
+  },
+  {
+   "seq": 88,
+   "kind": "escalation_committed",
+   "case_id": null
+  },
+  {
+   "seq": 89,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 90,
+   "kind": "packet_memo_recorded",
+   "case_id": "26ED00101"
+  },
+  {
+   "seq": 91,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 92,
+   "kind": "packet_memo_recorded",
+   "case_id": "26ED00102"
+  },
+  {
+   "seq": 93,
+   "kind": "tool_call",
+   "case_id": null
+  },
+  {
+   "seq": 94,
+   "kind": "run_finished",
+   "case_id": null
+  }
+ ],
+ "counts": {
+  "total": 48,
+  "interrupt": 2,
+  "surface_today": 18,
+  "monitor": 26,
+  "hold": 2,
+  "flagged": 15,
+  "audit_events": 94
+ }
+}
