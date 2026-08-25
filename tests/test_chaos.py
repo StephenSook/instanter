@@ -1013,3 +1013,165 @@ def test_corrupt_intake_file_raises_loudly(tmp_path: Path) -> None:
     # Nothing pretended to start: no run_started event, no escalations.
     assert audit_kinds(ctx) == []
     assert store.list_escalations() == []
+
+
+# --- Round-7 reproducers ------------------------------------------------------
+
+
+def test_later_deferral_never_hides_an_unapproved_candidate(tmp_path: Path) -> None:
+    """Round-7 reproducer: the approval was bound to A-1 and DELIVERED, then
+    a retry interrupt auto-deferred. B-2 is still an urgent case no human
+    resolved; the bound approval's obligation extends current-candidate
+    parity whatever the latest scalar action says."""
+    from agent.runner import _report
+
+    ctx = make_ctx(
+        tmp_path,
+        [good_record("A-1", service_date="2026-08-30"), good_record("B-2", "2026-08-31")],
+        capacity=2,
+    )
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    for decision in ctx.interrupt_candidates:
+        tools["submit_escalation_rationale"](
+            case_id=decision.case_id,
+            disposition=decision.level.value,
+            contributing_factors=list(decision.factors)[:8],
+            rationale="Deadline has passed with no answer on file.",
+            confidence=0.9,
+        )
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, ("A-1",))  # the attorney only ever saw A-1
+    tools["commit_escalations"]()
+    assert ctx.committed_case_ids == ("A-1",)
+    tools["write_packet_memo"](
+        case_id="A-1", memo="Effective deadline recorded; staff verify the intake facts."
+    )
+    ctx.attorney_action = "deferred"  # the synthetic single-use deferral
+
+    report = _report(ctx, mode="test")
+    assert "B-2" in report.failures  # the unapproved urgent case stays visible
+    assert not report.succeeded
+
+
+def test_unknown_jurisdiction_is_refused_not_ranked(tmp_path: Path) -> None:
+    """Round-7 reproducer: a typo'd jurisdiction id (GA-FULT0N) must never
+    ride the Georgia rule into a calm surface-today row under a green run;
+    the sweep cannot compute it, so it is a refused case that fails the run."""
+    ctx = make_ctx(
+        tmp_path,
+        [
+            good_record("GOOD-1"),
+            IntakeRecord(
+                case_id="TYPO-1",
+                jurisdiction_id="GA-FULT0N",  # zero for O: overdue if computed
+                service_date="2026-08-25",
+                service_method="personal",
+            ),
+        ],
+    )
+    tools = build_tools(ctx)
+    payload = json.loads(tools["get_ranked_queue"]())
+    assert {row["case_id"] for row in payload["queue"]} == {"GOOD-1"}
+    assert payload["refused_cases"][0]["case_id"] == "TYPO-1"
+    assert "GA-FULT0N" in payload["refused_cases"][0]["reason"]
+    assert "TYPO-1" in ctx.refused_cases  # reaches the report and fails the run
+    assert audit_kinds(ctx).count("case_refused") == 1
+
+
+def _write_intake(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
+    intake = tmp_path / "intake.json"
+    intake.write_text(json.dumps({"label": "EXAMPLE DATA", "records": rows}))
+    return intake
+
+
+def test_scheduler_retry_with_stable_run_id_reconciles_not_duplicates(
+    tmp_path: Path,
+) -> None:
+    """Round-7 reproducer: an at-least-once scheduler retry that reuses its
+    invocation id must reconcile against durable state, never write a second
+    escalation row (a fresh random id per retry bypasses the store's
+    (run_id, case_id) idempotency entirely)."""
+    from agent.runner import RunReport
+
+    intake = _write_intake(
+        tmp_path,
+        [
+            {
+                "case_id": "A-1",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            }
+        ],
+    )
+
+    def run_once() -> RunReport:
+        store = JsonFileCaseStore(
+            intake_path=intake,
+            escalations_path=tmp_path / "escalations.jsonl",
+        )
+        ctx = RunContext(
+            run_date=RUN_DATE,
+            attorney_capacity=2,
+            store=store,
+            audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+            run_id="evt-stable-1",
+        )
+        return run_deterministic(ctx)
+
+    first = run_once()
+    second = run_once()
+    assert first.committed == ("A-1",)
+    assert second.committed == ("A-1",)
+    assert second.succeeded
+    rows = [json.loads(line) for line in (tmp_path / "escalations.jsonl").read_text().splitlines()]
+    assert len([r for r in rows if r["case_id"] == "A-1"]) == 1
+
+
+def test_cli_run_id_flag_reaches_the_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The scheduler's stable invocation id must be suppliable end to end
+    through the CLI, or no deployed retry can ever reuse it."""
+    from agent import runner
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "runner",
+            "--mode",
+            "deterministic",
+            "--seed",
+            str(SEED),
+            "--out-dir",
+            str(tmp_path),
+            "--run-date",
+            "2026-09-09",
+            "--run-id",
+            "evt-stable-cli",
+        ],
+    )
+    runner.main()
+    out = json.loads(capsys.readouterr().out)
+    assert out["run_id"] == "evt-stable-cli"
+    assert out["succeeded"] is True
+
+
+def test_run_id_is_validated_at_construction(tmp_path: Path) -> None:
+    """The run id scopes durable idempotency and every audit row; malformed
+    ids fail at construction, not at the first durable write."""
+    store = JsonFileCaseStore(
+        intake_path=tmp_path / "unused.json",
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    audit = JsonlAuditSink(tmp_path / "audit.jsonl")
+    for bad in ("", "evt with spaces", "x" * 65, "evt\n1"):
+        with pytest.raises(ValueError, match="run_id"):
+            RunContext(
+                run_date=RUN_DATE,
+                attorney_capacity=2,
+                store=store,
+                audit=audit,
+                run_id=bad,
+            )

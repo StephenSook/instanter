@@ -437,10 +437,13 @@ def _report(
         for case_id in ctx.approved_case_ids or ():
             if case_id not in ctx.committed_case_ids and case_id not in owed:
                 owed.append(case_id)
-        if ctx.attorney_action in ("approved", "pending"):
-            for decision in ctx.interrupt_candidates:
-                if decision.case_id not in ctx.committed_case_ids and decision.case_id not in owed:
-                    owed.append(decision.case_id)
+        # Current-candidate parity runs under ANY outstanding obligation,
+        # including a bound approval later overwritten by the synthetic
+        # single-use deferral: an urgent case no human resolved must never
+        # hide behind the latest scalar action.
+        for decision in ctx.interrupt_candidates:
+            if decision.case_id not in ctx.committed_case_ids and decision.case_id not in owed:
+                owed.append(decision.case_id)
         failures = tuple(owed)
     missing_memos: tuple[str, ...] = ()
     if obligation_outstanding:
@@ -480,6 +483,16 @@ def main() -> None:
             "harness convenience."
         ),
     )
+    parser.add_argument(
+        "--run-id",
+        default=None,
+        help=(
+            "stable scheduler invocation id (e.g. the EventBridge event id). "
+            "An at-least-once retry MUST reuse the id so its commit "
+            "reconciles against durable state instead of duplicating "
+            "escalations under a fresh random id. Omitted: a fresh id."
+        ),
+    )
     args = parser.parse_args()
     if args.mode == "live" and args.attorney_response is None:
         parser.error(
@@ -498,11 +511,15 @@ def main() -> None:
         escalations_path=out_dir / "escalations.jsonl",
     )
     audit = JsonlAuditSink(out_dir / "audit.jsonl")
+    ctx_kwargs: dict[str, str] = {}
+    if args.run_id is not None:
+        ctx_kwargs["run_id"] = args.run_id
     ctx = RunContext(
         run_date=run_date,
         attorney_capacity=args.capacity,
         store=store,
         audit=audit,
+        **ctx_kwargs,  # type: ignore[arg-type]
     )
 
     if args.mode == "deterministic":
