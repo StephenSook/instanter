@@ -310,7 +310,9 @@ def _run_graph_case(
         # date or rank beside the correct fact sheet.
         effective = effective_by_case.get(case_id, "")
         if effective and effective != "None":
-            anchored = f"Effective deadline {effective}." in memo
+            # No trailing period in the anchor: an unverified summons basis
+            # renders a qualifier after the date.
+            anchored = f"Effective deadline {effective}" in memo
         else:
             anchored = "No reliable deadline was established" in memo
         notes_tail = memo.split("Reviewer notes:", 1)[1] if "Reviewer notes:" in memo else ""

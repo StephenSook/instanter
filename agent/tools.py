@@ -66,9 +66,20 @@ def packet_facts(ctx: RunContext, case_id: str) -> str:
     decision = ctx.decision_for(case_id)
     deadline = ctx.deadlines.get(case_id)
     record = ctx.records.get(case_id)
+    from engine.deadline import DeadlineBasis
+
     parts: list[str] = []
     if deadline is not None and deadline.effective_deadline is not None:
-        parts.append(f"Effective deadline {deadline.effective_deadline}.")
+        if deadline.deadline_basis is DeadlineBasis.SUMMONS_ONLY_UNVERIFIED:
+            # DeadlineBasis's own contract: never present a summons-only
+            # date as a finalized statutory computation.
+            parts.append(
+                f"Effective deadline {deadline.effective_deadline} "
+                "(summons-stated, UNVERIFIED; the statutory computation was "
+                "refused and attorney confirmation is required)."
+            )
+        else:
+            parts.append(f"Effective deadline {deadline.effective_deadline}.")
     if decision is not None:
         if decision.days_remaining is not None:
             parts.append(
@@ -84,7 +95,13 @@ def packet_facts(ctx: RunContext, case_id: str) -> str:
     if record is not None:
         parts.append(f"Service method recorded as {record.service_method}.")
     if deadline is not None and deadline.flags:
-        parts.append("Flags: " + ", ".join(f.code.value for f in deadline.flags) + ".")
+        # The flags' REASON texts are the attorney-facing substance (the
+        # competing computed date in a summons conflict, the no-roll
+        # closure advisory with the reopen date); bare enum codes told the
+        # attorney a conflict existed but never what the other date was.
+        parts.append(
+            "Flags: " + " ".join(f"[{f.code.value}] {f.reason[:220]}" for f in deadline.flags)
+        )
     # Recorded intake-analysis ambiguities are packet facts too: silently
     # dropping them loses exactly the open questions the attorney must
     # resolve (round 11: two cases' recorded ambiguities never reached
@@ -268,6 +285,10 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                         "effective": str(result.effective_deadline),
                         "basis": result.deadline_basis.value,
                         "flags": [f.code.value for f in result.flags],
+                        # Reason texts make the trail self-contained: the
+                        # competing date in a summons conflict lived only in
+                        # process memory before this.
+                        "flag_reasons": [f.reason[:300] for f in result.flags],
                     },
                     run_id=ctx.run_id,
                 )

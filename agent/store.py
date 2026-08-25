@@ -281,9 +281,15 @@ class JsonFileCaseStore:
         # case-variant sibling ('26ED00101 ', '26ed00101') contests the
         # identity instead of leaving its stale twin sweeping alone.
         def _identity_key(case_id: str) -> str:
-            # Collapse ALL whitespace, not just edges: interior-space
-            # variants are the same visual identity.
-            return "".join(case_id.split()).casefold()
+            # Collapse ALL whitespace (interior-space variants are the same
+            # visual identity) and fold the classic ASCII confusable pairs
+            # (capital O for zero, lowercase l / uppercase I for one): a
+            # hand-keyed '26EDO0101' beside '26ED00101' is a transposition
+            # of ONE docket, and both rows must be contested, never swept
+            # as two urgent cases holding two capacity slots. Dedup contest
+            # only; stored ids are never rewritten.
+            confusables = str.maketrans("oli", "011")
+            return "".join(case_id.split()).casefold().translate(confusables)
 
         counts: dict[str, int] = {}
         first_seen: dict[str, str] = {}

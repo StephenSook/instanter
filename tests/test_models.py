@@ -354,3 +354,31 @@ def test_month_may_rejected_in_every_casing_modal_stays_legal() -> None:
     # Round-17 LOW: system-vocabulary words no longer starve the writers.
     assert reject_model_numerics("the ladder does not use a score; it ranks", "notes")
     assert reject_model_numerics("on the eve of the hearing the notes were read", "notes")
+
+
+def test_may_context_covers_attributive_and_month_first_forms() -> None:
+    """Round-18 reproducers: attributive and month-first May phrasings
+    dodged the preposition-only pattern, while common modal hedge frames
+    ('this may reflect', 'by may already be') were false positives."""
+    from agent.models import reject_model_numerics
+
+    for poisoned in (
+        "the may hearing needs staff confirmation",
+        "the may deadline is close",
+        "come may the writ will issue",
+        "may arrives before the hearing",
+        "due by May",
+        "the answer is due by christmas",
+        "the deadline falls on thanksgiving",
+        "due on the weekend after service",
+    ):
+        with pytest.raises(ValueError):
+            reject_model_numerics(poisoned, "notes")
+    for legal in (
+        "the notes suggest this may reflect defective service",
+        "the recorded method for this may need confirmation",
+        "whether the answer described by may already be on file",
+        "service may be defective",
+        "the tenant plans to resolve arrears this week",
+    ):
+        assert reject_model_numerics(legal, "notes")

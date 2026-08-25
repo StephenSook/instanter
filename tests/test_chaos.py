@@ -2016,3 +2016,94 @@ def test_typo_approval_is_invalid_not_a_green_deferral(tmp_path: Path) -> None:
     assert ctx.approval_invalidated
     assert report.failures  # the urgent queue cannot vanish behind a typo
     assert not report.succeeded
+
+
+# --- Round-18 reproducers -----------------------------------------------------
+
+
+def test_defer_prefix_cannot_swallow_approvals_or_non_deferrals(tmp_path: Path) -> None:
+    """Round-18 reproducer: 'Deferring to your judgment, approve all' and
+    'Defer the rest, approve only X' parsed as clean deferrals and the run
+    exited 0 green with urgent cases resolved by nobody."""
+    from agent.hooks import parse_attorney_response
+
+    for probe in (
+        "Defer the rest, approve only 26ED00101",
+        "Defer nothing, approve all",
+        "Deferring to your judgment, approve all",
+        "Deference to the supervising attorney suggests approval",
+        "deferred maintenance noted in the file; approve",
+    ):
+        action, _ = parse_attorney_response(probe)
+        assert action == "invalid", probe
+
+    for probe in ("defer", "DEFERRED.", "defer: in hearings", "Defer until the calendar clears"):
+        action, _ = parse_attorney_response(probe)
+        assert action == "deferred", probe
+
+    ctx = seed_ctx(tmp_path)
+    report = run_deterministic(ctx, attorney_response="Deferring to your judgment, approve all")
+    assert report.failures  # the urgent queue cannot vanish behind a mixed response
+    assert not report.succeeded
+
+
+def test_confusable_ascii_docket_twins_are_contested(tmp_path: Path) -> None:
+    """Round-18 reproducer: '26ED00101' and '26EDO0101' (capital O for the
+    zero) swept as two urgent cases, held both capacity slots, and a
+    genuinely distinct 0-days case was demoted under a green run."""
+    intake = _write_intake(
+        tmp_path,
+        [
+            {
+                "case_id": "26ED00101",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+            {
+                "case_id": "26EDO0101",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+        ],
+    )
+    store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
+    result = store.load_intake()
+    assert result.records == ()  # both contested, neither sweeps alone
+    assert any("more than once" in m.reason for m in result.malformed)
+
+
+def test_summons_conflict_memo_carries_both_dates(tmp_path: Path) -> None:
+    """Round-18 reproducer: the memo told the attorney a summons conflict
+    existed but never what the competing computed date was; flag reasons
+    are attorney-facing substance."""
+    ctx = make_ctx(
+        tmp_path,
+        [
+            IntakeRecord(
+                case_id="SC-1",
+                jurisdiction_id="GA-FULTON",
+                service_date="2026-09-01",
+                service_method="personal",
+                summons_stated_deadline="2026-09-10",
+            )
+        ],
+        capacity=1,
+    )
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    decision = ctx.interrupt_candidates[0]
+    tools["submit_escalation_rationale"](
+        case_id="SC-1",
+        disposition=decision.level.value,
+        explanation="",
+        confidence=0.9,
+    )
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, ("SC-1",))
+    tools["commit_escalations"]()
+    tools["write_packet_memo"](case_id="SC-1", notes="")
+    memo = ctx.packet_memos["SC-1"]
+    assert "summons_date_conflict" in memo
+    assert "statutory computation gives" in memo  # the competing date's sentence
