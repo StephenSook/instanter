@@ -15,11 +15,33 @@ A background triage agent for eviction-defense clinics. It watches a clinic's in
 
 The endpoint returns both lists in full, so the headline can be checked by counting rows. `infra/verify_door.sh` runs that check, and four others, from outside with no credentials.
 
+### Run the agent yourself
+
+`POST /api/run` starts a real sweep of all 48 cases on Amazon Bedrock AgentCore. It stops at the attorney interrupt and returns the cases a human is being asked to approve. Answer it with `POST /api/run/{id}/decision`:
+
+```sh
+RUN=$(curl -s -X POST https://d2ew2t4uldglcr.cloudfront.net/api/run \
+  -H 'Content-Type: application/json' -d '{"capacity":2}' | jq -r .run_id)
+
+curl -s -X POST "https://d2ew2t4uldglcr.cloudfront.net/api/run/$RUN/decision" \
+  -H 'Content-Type: application/json' -d '{"response":"approve"}' | jq .result
+```
+
+Three answers, three different outcomes, and the third is the one worth trying:
+
+| You send | What happens |
+|---|---|
+| `approve` | both cases committed, run succeeds |
+| `defer: <reason>` | nothing committed, the cases stay listed as owed |
+| `aprove` (a typo) | **not read as a decision.** The deterministic floor commits the cases for later review and the run reports failure, because no human actually decided. |
+
+Live runs are capped per day, because this endpoint spends money on a model. `/api/stats` is pure arithmetic and is never capped.
+
 ## Status
 
 Under active build for the Agents for Humans Hackathon (submission window Aug 10 to Sep 14, 2026). This README grows with the code; nothing is claimed here before it ships.
 
-Shipped and reachable today: the deterministic deadline engine, the triage agent with its attorney-approval interrupt, the operator console, and the public door above. The door's `/api/run` endpoint returns an explicit 503 until the agent runtime is wired behind it, rather than pretending to start a run it cannot serve.
+Shipped and reachable today: the deterministic deadline engine, the triage agent with its attorney-approval interrupt on AgentCore Runtime, the operator console, and the public door above.
 
 ## Why
 
