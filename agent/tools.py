@@ -123,8 +123,12 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         refused: list[dict[str, str]] = []
         for record in ctx.records.values():
             try:
+                # TypeError/ValueError here are data-shaped: a wrongly-typed
+                # field detonates in to_case_input or the frozen engine's
+                # CaseInput validation. All of them become refusals; engine
+                # COMPUTATION errors stay loud (they are programming errors).
                 case_input = to_case_input(record)
-            except IntakeParseError as exc:
+            except (IntakeParseError, TypeError, ValueError) as exc:
                 # One malformed row must never kill the unattended sweep of
                 # the rows that parsed. It becomes a case-level refusal a
                 # human resolves, loudly audited, surfaced in the output.

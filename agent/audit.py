@@ -9,6 +9,7 @@ property of the storage rather than a promise of the code.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -35,7 +36,15 @@ class JsonlAuditSink:
 
     def __init__(self, path: Path) -> None:
         self._path = path
-        self._sequence = 0
+        # The sequence continues from the existing file, so appending
+        # multiple runs to one file never reuses a seq value: the gap
+        # detection the audit story leans on stays meaningful.
+        self._sequence = self._existing_line_count()
+
+    def _existing_line_count(self) -> int:
+        if not self._path.exists():
+            return 0
+        return sum(1 for line in self._path.read_text().splitlines() if line.strip())
 
     def append(self, event: AuditEvent) -> None:
         self._sequence += 1
@@ -47,10 +56,25 @@ class JsonlAuditSink:
             "case_id": event.case_id,
             "payload": event.payload,
         }
+        # Flush and fsync per event: an audit line either exists durably or
+        # the append raises. A legal audit trail cannot sit in a page cache.
         with self._path.open("a") as handle:
             handle.write(json.dumps(row, default=str) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
 
     def read_all(self) -> list[dict[str, Any]]:
         if not self._path.exists():
             return []
-        return [json.loads(line) for line in self._path.read_text().splitlines() if line.strip()]
+        rows: list[dict[str, Any]] = []
+        for lineno, line in enumerate(self._path.read_text().splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"audit file {self._path} is corrupt at line {lineno}; "
+                    "refusing to read a damaged audit trail"
+                ) from exc
+        return rows
