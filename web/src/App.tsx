@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Lenis from "lenis";
 import gsap from "gsap";
 import { Cabinet } from "./components/Cabinet";
+import { LiveProof } from "./components/LiveProof";
 import { Packet } from "./components/Packet";
 import { loadQueue, type QueueSnapshot } from "./data";
 
@@ -59,18 +60,20 @@ export default function App() {
           <a href="#/" className="display text-[1.15rem] tracking-wide">
             Instanter
           </a>
-          <p className="hidden font-mono text-[0.62rem] tracking-[0.2em] text-white/40 uppercase sm:block">
+          <p className="hidden font-mono text-[0.62rem] tracking-[0.2em] text-white/60 uppercase sm:block">
             Georgia dispossessory answer-deadline triage
           </p>
         </div>
       </header>
+
+      <LiveProof />
 
       <main>
         {error && (
           <div className="mx-auto max-w-3xl px-5 py-24">
             <h1 className="display text-4xl">The queue snapshot did not load</h1>
             <p className="mt-3 font-mono text-sm text-white/60">{error}</p>
-            <p className="mt-2 font-mono text-xs text-white/40">
+            <p className="mt-2 font-mono text-xs text-white/60">
               Regenerate it with: .venv/bin/python scripts/export_queue.py
             </p>
           </div>
@@ -78,7 +81,7 @@ export default function App() {
 
         {!snapshot && !error && (
           <div className="mx-auto max-w-3xl px-5 py-24">
-            <p className="font-mono text-[0.7rem] tracking-[0.2em] text-white/40 uppercase">
+            <p className="font-mono text-[0.7rem] tracking-[0.2em] text-white/60 uppercase">
               Opening the cabinet
             </p>
           </div>
@@ -111,7 +114,7 @@ export default function App() {
       </main>
 
       <footer className="mx-auto max-w-[1400px] px-5 py-14 sm:px-10">
-        <p className="max-w-2xl font-mono text-[0.66rem] leading-relaxed text-white/35">
+        <p className="max-w-2xl font-mono text-[0.66rem] leading-relaxed text-white/55">
           Instanter states operative facts for a licensed attorney and never gives legal advice. Case
           records shown here are synthetic and labelled as such; the statute, the court calendar, and
           every computation are real.

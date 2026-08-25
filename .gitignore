@@ -66,3 +66,9 @@ web/.playwright-mcp/
 
 # local run output and screenshots
 out/
+
+# CDK / judge door build artifacts and the CloudFront origin secret
+infra/.venv-cdk/
+infra/cdk.out/
+infra/build/
+infra/.door-secret

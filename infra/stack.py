@@ -1,0 +1,175 @@
+"""The judge's door, as infrastructure.
+
+One CloudFront distribution over two origins, exactly as ADR-0006 decided:
+
+    CloudFront
+      ├─ default behavior  ->  S3 (private, Origin Access Control) : the console
+      └─ /api/*            ->  Lambda Function URL (AuthType NONE) : the door
+
+The Function URL stays public rather than IAM-signed because Origin Access
+Control on a Function URL forces `AWS_IAM`, after which a browser POST needs
+`x-amz-content-sha256`, which a plain `fetch` will not send. The documented
+alternative is a shared secret header that CloudFront adds and the function
+requires, so a caller who finds the Function URL directly is refused.
+
+Nothing here bills by the hour. DynamoDB is on-demand, Lambda and CloudFront
+are per-request, S3 holds a few hundred kilobytes. The account already carries
+another project's idle stack, so an hourly-billed resource in this design would
+be a mistake, not a tradeoff.
+"""
+
+from __future__ import annotations
+
+import os
+
+import aws_cdk as cdk
+from aws_cdk import aws_cloudfront as cloudfront
+from aws_cdk import aws_cloudfront_origins as origins
+from aws_cdk import aws_dynamodb as dynamodb
+from aws_cdk import aws_iam as iam
+from aws_cdk import aws_lambda as lambda_
+from aws_cdk import aws_s3 as s3
+from aws_cdk import aws_s3_deployment as s3deploy
+from constructs import Construct
+
+
+class JudgeDoorStack(cdk.Stack):
+    def __init__(self, scope: Construct, construct_id: str, **kwargs: object) -> None:
+        super().__init__(scope, construct_id, **kwargs)
+
+        origin_secret = os.environ.get("DOOR_ORIGIN_SECRET", "")
+        if not origin_secret:
+            # Fail at synth, not at runtime. A door deployed with an empty
+            # secret silently accepts direct origin access, which is exactly
+            # the bypass the secret exists to close.
+            raise ValueError(
+                "DOOR_ORIGIN_SECRET is unset. Generate one and export it:\n"
+                "  export DOOR_ORIGIN_SECRET=$(python3 -c "
+                "'import secrets;print(secrets.token_urlsafe(32))')"
+            )
+
+        agent_runtime_arn = os.environ.get("AGENT_RUNTIME_ARN", "")
+        git_sha = os.environ.get("GIT_SHA", "unknown")
+
+        # ---------------------------------------------------------- state
+        runs = dynamodb.TableV2(
+            self,
+            "RunTable",
+            partition_key=dynamodb.Attribute(name="run_id", type=dynamodb.AttributeType.STRING),
+            billing=dynamodb.Billing.on_demand(),
+            time_to_live_attribute="expires_at",
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
+        # ----------------------------------------------------------- door
+        door = lambda_.Function(
+            self,
+            "DoorFunction",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.handler",
+            code=lambda_.Code.from_asset("build/door"),
+            timeout=cdk.Duration.seconds(120),
+            memory_size=512,
+            # NO reserved concurrency, and this is a constraint rather than a
+            # preference. ADR-0006 chose reserved concurrency as the abuse
+            # control over a $6/month WAF, but this account's TOTAL Lambda
+            # concurrency limit is 10 (the new-account default is not the
+            # familiar 1000), and reserving any of it drops unreserved
+            # concurrency below the required minimum of 10. The deploy fails
+            # outright with InvalidRequest. The account ceiling is therefore
+            # already the concurrency cap, and the spend cap lives in the
+            # handler, on /api/run, which is the only endpoint that can cost
+            # money.
+            environment={
+                "RUN_TABLE": runs.table_name,
+                "ORIGIN_SECRET": origin_secret,
+                "AGENT_RUNTIME_ARN": agent_runtime_arn,
+                "GIT_SHA": git_sha,
+                "MAX_RUNS_PER_DAY": os.environ.get("MAX_RUNS_PER_DAY", "200"),
+            },
+        )
+        runs.grant_read_write_data(door)
+        if agent_runtime_arn:
+            door.add_to_role_policy(
+                iam.PolicyStatement(
+                    actions=["bedrock-agentcore:InvokeAgentRuntime"],
+                    # Scoped to the one runtime, plus its endpoints, rather
+                    # than a wildcard over every runtime in the account.
+                    resources=[agent_runtime_arn, f"{agent_runtime_arn}/*"],
+                )
+            )
+
+        door_url = door.add_function_url(auth_type=lambda_.FunctionUrlAuthType.NONE)
+
+        # -------------------------------------------------------- console
+        console = s3.Bucket(
+            self,
+            "ConsoleBucket",
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            enforce_ssl=True,
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+            auto_delete_objects=True,
+        )
+
+        distribution = cloudfront.Distribution(
+            self,
+            "Door",
+            comment="Instanter judge door",
+            default_root_object="index.html",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=origins.S3BucketOrigin.with_origin_access_control(console),
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+            ),
+            additional_behaviors={
+                "/api/*": cloudfront.BehaviorOptions(
+                    origin=origins.FunctionUrlOrigin(
+                        door_url,
+                        custom_headers={"x-instanter-origin": origin_secret},
+                    ),
+                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                    allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                    # /api/stats recomputes on every request. Caching it would
+                    # turn a live computation into a stored number, which is
+                    # the one thing it must not be.
+                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                    origin_request_policy=(
+                        cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER
+                    ),
+                ),
+            },
+            error_responses=[
+                # The console is a single-page app: a deep link must reach it
+                # rather than S3's XML error document.
+                cloudfront.ErrorResponse(
+                    http_status=403,
+                    response_http_status=200,
+                    response_page_path="/index.html",
+                    ttl=cdk.Duration.seconds(0),
+                ),
+                cloudfront.ErrorResponse(
+                    http_status=404,
+                    response_http_status=200,
+                    response_page_path="/index.html",
+                    ttl=cdk.Duration.seconds(0),
+                ),
+            ],
+            price_class=cloudfront.PriceClass.PRICE_CLASS_100,
+        )
+
+        s3deploy.BucketDeployment(
+            self,
+            "ConsoleDeployment",
+            sources=[s3deploy.Source.asset("build/console")],
+            destination_bucket=console,
+            distribution=distribution,
+            distribution_paths=["/*"],
+        )
+
+        cdk.CfnOutput(self, "DoorUrl", value=f"https://{distribution.distribution_domain_name}")
+        cdk.CfnOutput(
+            self, "StatsUrl", value=f"https://{distribution.distribution_domain_name}/api/stats"
+        )
+        cdk.CfnOutput(self, "FunctionUrl", value=door_url.url)
+        cdk.CfnOutput(self, "ConsoleBucketName", value=console.bucket_name)
+        cdk.CfnOutput(self, "RunTableName", value=runs.table_name)

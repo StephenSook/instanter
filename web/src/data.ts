@@ -100,3 +100,51 @@ export function countdown(days: number | null): string {
 export function formatFlag(code: string): string {
   return code.replace(/_/g, " ");
 }
+
+/** The live proof endpoint. The door recomputes every answer deadline in the
+ *  corpus on each request, so this is a measurement taken while you watch
+ *  rather than a number written into the page at build time. */
+export interface StatsDivergence {
+  case_id: string;
+  served: string;
+  hand_counted: string;
+  hand_counted_weekday: string;
+  statutory: string;
+  statutory_weekday: string;
+  days_off: number;
+}
+
+export interface StatsSummons {
+  case_id: string;
+  computed: string;
+  controlling: string;
+  authority: string;
+}
+
+export interface Stats {
+  recomputed_at: string;
+  note: string;
+  corpus: { cases: number; label: string; run_date: string };
+  computation: {
+    deadlines_computed: number;
+    refused_unverified: number;
+    cases_carrying_a_flag: number;
+    elapsed_ms: number;
+    citation: string;
+  };
+  headline: {
+    answer_deadlines_hand_counting_gets_wrong: number;
+    of_deadlines_computed: number;
+    why_it_matters: string;
+  };
+  because_the_deadline_rolls: StatsDivergence[];
+  because_the_summons_controls: StatsSummons[];
+}
+
+export async function loadStats(): Promise<Stats> {
+  const response = await fetch("/api/stats", { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return (await response.json()) as Stats;
+}

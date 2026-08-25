@@ -57,11 +57,40 @@ Consequences of that shape, in order of why it was chosen:
   header** that CloudFront adds and the function requires, which is the documented
   pattern.
 
-**Abuse protection is reserved concurrency plus a function-side counter, not WAF, unless
-the submission needs WAF named.** A WAF web ACL is a fixed **$6.00 per month** ($5 for
-the ACL, $1 for one rule) against roughly $0 of usage-based cost for everything else at
-demo volume. Reserved concurrency caps requests per second at ten times the reserved
-value and can be set to zero to stop all traffic instantly, at no cost.
+**Abuse protection is a function-side spend counter, not WAF.** A WAF web ACL is a fixed
+**$6.00 per month** ($5 for the ACL, $1 for one rule) against roughly $0 of usage-based
+cost for everything else at demo volume.
+
+### Amended 2026-08-25, after the first deploy failed
+
+This decision originally named **reserved concurrency** as the control. That is not
+available here, and the correction is recorded rather than quietly edited away because
+the reasoning changed.
+
+The first deploy failed outright:
+
+```
+Specified ReservedConcurrentExecutions for function decreases account's
+UnreservedConcurrentExecution below its minimum value of [10]
+```
+
+This account's **total** Lambda concurrency limit is **10**, not the familiar 1000, so
+reserving any of it drops unreserved concurrency below the required minimum and the
+`AWS::Lambda::Function` resource is rejected. The account ceiling is therefore already
+the concurrency cap, imposed from above and not by us.
+
+That turned out to sharpen the design rather than weaken it. **Concurrency was never the
+right thing to bound; spend was.** `/api/stats` is pure arithmetic over 48 records and
+costs nothing however often it is called, so capping it would only make the checkable
+number less checkable. `/api/run` invokes a model and is the only endpoint that can
+spend money. The cap now lives there, as an atomic DynamoDB counter keyed on the day,
+and a caller who reaches it gets a `429` that states the count, the cap, and the fact
+that `/api/stats` is never capped.
+
+One process note worth keeping: the failing deploy reported **exit code 0**, because the
+command was piped to `tail` and the pipeline returned tail's status. The failure was
+found by reading the log, not by trusting the exit code. Gate commands run with no pipe
+on the exit path.
 
 ## Consequences
 
