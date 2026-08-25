@@ -456,10 +456,14 @@ def test_graph_exception_still_runs_floor_and_reports_model_error(
     assert report.backstop_used
     assert "simulated Bedrock outage" in report.model_error
     assert len(report.committed) == 2  # the sweep still delivered
-    assert not report.succeeded  # but the run is not allowed to read green
+    # Nobody was presented anything, so no approval is claimed: the floor
+    # commits as PENDING attorney review, never as approved.
+    assert report.attorney_action == "pending"
+    assert not report.succeeded  # and the run is not allowed to read green
     kinds = audit_kinds(ctx)
     assert "model_error" in kinds
     assert "deterministic_backstop" in kinds
+    assert "pending_review_commit" in kinds
     assert "escalation_committed" in kinds
 
 
@@ -730,6 +734,121 @@ def test_commit_never_exceeds_the_approval_snapshot(tmp_path: Path) -> None:
     events = ctx.audit.read_all()  # type: ignore[attr-defined]
     refusals = [e for e in events if e["kind"] == "commit_refused"]
     assert any(e["payload"]["reason"] == "requires_new_approval" for e in refusals)
+
+
+def test_stale_durable_content_is_a_conflict_not_a_success(tmp_path: Path) -> None:
+    """Round-5 reproducer: a durable row with this run's key but DIFFERENT
+    content (stale rank, old rationale) must never be silently counted as
+    this run's commit; it is an audited conflict that fails the run."""
+    from agent.runner import _report
+
+    ctx = make_ctx(tmp_path, [good_record("A-1", service_date="2026-08-30")], capacity=1)
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    decision = ctx.interrupt_candidates[0]
+    tools["submit_escalation_rationale"](
+        case_id=decision.case_id,
+        disposition=decision.level.value,
+        contributing_factors=list(decision.factors)[:8],
+        rationale="Deadline has passed with no answer on file.",
+        confidence=0.9,
+    )
+    # A stale writer already landed a same-key row with different content.
+    ctx.store.record_escalation(
+        EscalationRecord(
+            case_id="A-1",
+            disposition="interrupt",
+            rank=99,
+            factors=("stale",),
+            rationale="An old rationale from a divergent writer.",
+            confidence=0.5,
+            run_id=ctx.run_id,
+        )
+    )
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, ("A-1",))
+    result = tools["commit_escalations"]()
+
+    assert "STORE CONFLICT" in result
+    assert ctx.committed_case_ids == ()  # the stale row is NOT this run's commit
+    assert "store_conflict" in audit_kinds(ctx)
+    report = _report(ctx, mode="test")
+    assert "A-1" in report.failures
+    assert not report.succeeded
+
+
+def test_candidate_outside_the_approval_fails_the_run(tmp_path: Path) -> None:
+    """Round-5 reproducer: a case minted after the approval cannot ride it,
+    AND it cannot vanish behind a green run; it stays a failure until a
+    fresh approval resolves it."""
+    from agent.runner import _report
+
+    ctx = make_ctx(
+        tmp_path,
+        [good_record("A-1", service_date="2026-08-30"), good_record("B-2", "2026-08-31")],
+        capacity=2,
+    )
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    for decision in ctx.interrupt_candidates:
+        tools["submit_escalation_rationale"](
+            case_id=decision.case_id,
+            disposition=decision.level.value,
+            contributing_factors=list(decision.factors)[:8],
+            rationale="Deadline has passed with no answer on file.",
+            confidence=0.9,
+        )
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, ("A-1",))  # the attorney only ever saw A-1
+    tools["commit_escalations"]()
+
+    assert ctx.committed_case_ids == ("A-1",)
+    report = _report(ctx, mode="test")
+    assert "B-2" in report.failures  # the un-approved urgent case is not lost
+    assert not report.succeeded
+
+
+def test_second_interrupt_gets_deferred_not_replayed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The supplied response is ONE human decision: a second interrupt in
+    the same run must receive a fail-closed deferral, never a replay."""
+    from strands.multiagent import Status
+
+    import agent.graph as graph_module
+    from agent.runner import run_live
+
+    answers: list[str] = []
+
+    class FakeInterrupt:
+        id = "int-1"
+
+    class FakeResult:
+        def __init__(self, status: object, interrupts: list[object]) -> None:
+            self.status = status
+            self.interrupts = interrupts
+
+    class TwoInterruptGraph:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, payload: object) -> object:
+            self.calls += 1
+            if isinstance(payload, list):
+                for item in payload:
+                    answers.append(item["interruptResponse"]["response"])
+            if self.calls <= 2:
+                return FakeResult(Status.INTERRUPTED, [FakeInterrupt()])
+            return FakeResult(Status.COMPLETED, [])
+
+    monkeypatch.setattr(
+        graph_module, "build_triage_graph", lambda ctx, plugins=None: TwoInterruptGraph()
+    )
+    ctx = seed_ctx(tmp_path)
+    run_live(ctx, attorney_response="approve")
+
+    assert answers[0] == "approve"
+    assert answers[1].startswith("defer: the single-use attorney response")
 
 
 def test_overlapping_audit_sinks_never_share_a_sequence(tmp_path: Path) -> None:
