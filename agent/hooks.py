@@ -43,6 +43,7 @@ def presented_content_digest(ctx: RunContext, case_ids: tuple[str, ...]) -> str:
                 "level": decision.level.value if decision else None,
                 "held_reason": decision.held_reason if decision else None,
                 "factors": list(decision.factors) if decision else None,
+                "flags": list(decision.flags) if decision else None,
                 "rationale": rationale.rationale if rationale else None,
                 "disposition": rationale.disposition if rationale else None,
                 "confidence": rationale.confidence if rationale else None,
@@ -147,8 +148,12 @@ class AttorneyApprovalHook(HookProvider):
         elif self._ctx.pending_approval_digest != current_digest:
             # The queue or a rationale changed while the approval was
             # pending: whatever the attorney answered, it was about content
-            # that no longer exists. Void the exchange, fail closed.
+            # that no longer exists. Void the exchange, fail closed. This is
+            # NOT an ordinary deferral: no human resolved these candidates,
+            # so the invalidation flag keeps the obligation alive (the floor
+            # commits them as pending review; the run never reads green).
             self._ctx.attorney_action = "deferred"
+            self._ctx.approval_invalidated = True
             self._ctx.pending_approval_digest = None
             self._ctx.audit.append(
                 AuditEvent(
@@ -156,6 +161,7 @@ class AttorneyApprovalHook(HookProvider):
                     case_id=None,
                     payload={
                         "action": "deferred",
+                        "approval_invalidated": True,
                         "reason": (
                             "presented content changed while approval was "
                             "pending; a fresh interrupt is required"
@@ -176,6 +182,7 @@ class AttorneyApprovalHook(HookProvider):
                 "rank": d.rank,
                 "days_remaining": d.days_remaining,
                 "factors": list(d.factors),
+                "flags": list(d.flags),
                 "rationale": (
                     self._ctx.rationales[d.case_id].rationale
                     if d.case_id in self._ctx.rationales

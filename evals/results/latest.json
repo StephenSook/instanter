@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-08-24T23:09:41.229511-04:00",
-  "git_sha": "b8588ece527a36b7eda813616517ee3867d28bf9",
-  "inputs_digest": "995117f66a213d111c94f70131bf671cebdd5bf589a9178415a056184c5413cd",
+  "generated_at": "2026-08-24T23:28:40.087112-04:00",
+  "git_sha": "07af55b097778995c0a9f42c623a2df02d736d57",
+  "inputs_digest": "c391b4752784ed0c84495785df2d5f987f1afc29aa6543e8f4762b342ef93fd7",
   "seed": "synthetic_intake.json",
   "run_date": "2026-09-09",
   "llm_judges_included": true,
@@ -96,28 +96,28 @@
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales state operative facts only (deadline date, days remaining) and read clearly. The additional details in the output do not affect the scoring of the rationales."
+      "reason": "The rationales state operative facts only and read clearly, meeting the criteria for a score of 1.0."
     },
     {
       "case": "defer-capacity-2",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales provided in the output are factual, specific, and clear, meeting the criteria of the rubric. They include operative facts such as deadline dates and days remaining, without any legal advice or conclusions. The presence of extra details in the output does not affect the quality of the rationales."
+      "reason": "The output provides clear and specific rationales that include operative facts only, such as the effective deadline date and the number of days remaining. There is no legal advice or conclusions provided, meeting the criteria for a score of 1.0."
     },
     {
       "case": "approve-capacity-1",
       "evaluator": "rationale-quality",
-      "score": 0.9,
+      "score": 1.0,
       "passed": true,
-      "reason": "The rationales section contains factual and clear operative facts. The additional information in the output, while not part of the expected output, does not contain legal advice or conclusions, so the score is slightly reduced but still close to 1.0."
+      "reason": "The rationale states operative facts only and reads clearly. The additional information in the output does not affect the score according to the rubric."
     },
     {
       "case": "approve-capacity-5",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The output contains detailed, factual rationales for each case, mentioning operative facts such as the effective deadline, days remaining, and specific issues. There is no legal advice or conclusions given, only factual statements. Therefore, the output meets the criteria for a score of 1.0."
+      "reason": "The rationales are factual, clear, and include operative facts such as deadline dates, days remaining, service methods, and flags. There are no instances of legal advice, legal conclusions, or bare urgency scores."
     },
     {
       "case": "chaos-notes-timeout-approve-2",

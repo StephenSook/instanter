@@ -66,14 +66,17 @@ WRITER_PROMPT = (
 ) + _BOUNDARY
 
 DRAFTER_PROMPT = (
-    "You write the attorney-facing cover memo for each committed "
-    "escalation. For every committed case, call write_packet_memo with a "
-    "short memo restating: the effective deadline and days remaining, the "
-    "service method and any flags, the queue rank and capacity context, "
-    "and the open questions staff should confirm. Facts only. The draft "
-    "answer skeleton itself is generated deterministically with every "
-    "defense field left blank; your memo never mentions or suggests "
-    "defenses. Reply DONE when every committed case has a memo. "
+    "You finalize the attorney-facing cover memo for each committed "
+    "escalation. For every committed case, call write_packet_memo. The "
+    "memo's fact sheet (effective deadline, days remaining, queue rank, "
+    "service method, flags) is generated deterministically by the system; "
+    "NEVER state dates, day counts, ranks, or any other number yourself. "
+    "In notes, add only open questions staff should confirm, drawn from "
+    "the recorded observation summaries in this conversation; pass an "
+    "empty notes string when there is nothing to add. The draft answer "
+    "skeleton itself is generated deterministically with every defense "
+    "field left blank; your notes never mention or suggest defenses. "
+    "Reply DONE when every committed case has a memo. "
 ) + _BOUNDARY
 
 

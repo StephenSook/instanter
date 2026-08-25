@@ -72,6 +72,12 @@ _NO_CLOCK_FLAGS = frozenset(
         FlagCode.JURISDICTION_UNSUPPORTED,
     }
 )
+# Every flag the discriminators above consume. Any OTHER engine flag,
+# present or future, floors the case at surface-today: a flag exists
+# because a human needs to see something, and an unmapped flag silently
+# dissolving into a monitor row is undertriage-shaped (unknown service
+# method and amended affidavit did exactly that until round 9).
+_HANDLED_FLAGS = _SERVICE_RISK_FLAGS | _CALENDAR_RISK_FLAGS | _NO_CLOCK_FLAGS
 
 # Hard acuity gates (calendar days from the run date to the effective
 # deadline). Inclusive upper bounds.
@@ -122,6 +128,10 @@ class TriageDecision:
     interrupt_now: bool
     held_reason: str | None  # set when capacity demoted an L1 candidate
     factors: tuple[str, ...] = field(default=())  # rationale facts, in order
+    # Raw engine flag codes, verbatim: the ranked review surface must show
+    # every uncertainty the engine recorded, not only the ones a
+    # discriminator consumed.
+    flags: tuple[str, ...] = field(default=())
 
 
 def _raise_level(level: UrgencyLevel, steps: int = 1) -> UrgencyLevel:
@@ -245,6 +255,18 @@ def triage_queue(
             level = _raise_level(level)
             raised_by.append("unverified_clock")
             factors.append("the deadline basis is unverified; attorney confirmation required")
+        # Fail closed on every unmapped engine flag: floor at surface-today
+        # and carry the engine's own reason into the review surface.
+        for flag in case.deadline.flags:
+            if flag.code in _HANDLED_FLAGS:
+                continue
+            level = _note_floor(
+                level,
+                raised_by,
+                factors,
+                f"engine_flag_{flag.code.value}",
+                (f"engine flag {flag.code.value}: {flag.reason}")[:220],
+            )
 
         # Note-derived signal policy (fail closed, bounded): each signal can
         # floor the case at L2 surface-today so a human looks at it TODAY,
@@ -355,6 +377,7 @@ def triage_queue(
                 interrupt_now=interrupt_now,
                 held_reason=held_reason,
                 factors=tuple(factors),
+                flags=tuple(f.code.value for f in case.deadline.flags),
             )
         )
     return decisions

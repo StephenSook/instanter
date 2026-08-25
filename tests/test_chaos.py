@@ -409,7 +409,7 @@ def test_refusals_are_audited(tmp_path: Path) -> None:
     tools["commit_escalations"]()
     tools["commit_escalations"]()  # second call -> already committed
     tools["write_packet_memo"](
-        case_id=interrupt_id, memo="The tenant should raise the defense of tender."
+        case_id=interrupt_id, notes="The tenant should raise the defense of tender."
     )
 
     kinds = audit_kinds(ctx)
@@ -643,10 +643,15 @@ def test_post_approval_failure_recovers_through_the_floor(
     assert not report.succeeded  # the model death still fails the run
     stored = ctx.store.list_escalations(run_id=ctx.run_id)
     assert sorted(e.case_id for e in stored) == sorted(report.committed)
-    # The attorney packet is complete: recovered cases carry template memos.
+    # The attorney packet is complete, and every memo carries the engine's
+    # own deterministic fact sheet (round-9: fabricated memo facts are
+    # impossible by construction; facts never come from a model).
     assert report.missing_memos == ()
     assert all(cid in ctx.packet_memos for cid in report.committed)
-    assert all("[MODEL DISABLED" in ctx.packet_memos[cid] for cid in report.committed)
+    assert all(
+        f"Effective deadline {ctx.deadlines[cid].effective_deadline}." in ctx.packet_memos[cid]
+        for cid in report.committed
+    )
 
 
 def test_concurrent_same_run_writers_never_duplicate_an_escalation(tmp_path: Path) -> None:
@@ -1044,9 +1049,7 @@ def test_later_deferral_never_hides_an_unapproved_candidate(tmp_path: Path) -> N
     bind_approval(ctx, ("A-1",))  # the attorney only ever saw A-1
     tools["commit_escalations"]()
     assert ctx.committed_case_ids == ("A-1",)
-    tools["write_packet_memo"](
-        case_id="A-1", memo="Effective deadline recorded; staff verify the intake facts."
-    )
+    tools["write_packet_memo"](case_id="A-1", notes="")
     ctx.attorney_action = "deferred"  # the synthetic single-use deferral
 
     report = _report(ctx, mode="test")
@@ -1264,3 +1267,83 @@ def test_run_id_is_validated_at_construction(tmp_path: Path) -> None:
                 audit=audit,
                 run_id=bad,
             )
+
+
+# --- Round-9 reproducers ------------------------------------------------------
+
+
+def test_invalidated_approval_is_an_outstanding_obligation(tmp_path: Path) -> None:
+    """Round-9 reproducer: a digest mismatch at resume recorded an ordinary
+    'deferred' and the run exited green with zero commits, although no
+    human ever resolved the candidates. Invalidation must keep the
+    obligation alive."""
+    from agent.hooks import AttorneyApprovalHook
+    from agent.runner import _report
+
+    ctx = make_ctx(tmp_path, [good_record("A-1", service_date="2026-08-30")], capacity=1)
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    decision = ctx.interrupt_candidates[0]
+    tools["submit_escalation_rationale"](
+        case_id=decision.case_id,
+        disposition=decision.level.value,
+        contributing_factors=list(decision.factors)[:8],
+        rationale="Deadline has passed with no answer on file.",
+        confidence=0.9,
+    )
+
+    class FakeEvent:
+        def __init__(self) -> None:
+            self.tool_use = {"name": "commit_escalations"}
+            self.cancel_tool: str | None = None
+
+        def interrupt(self, name: str, reason: object) -> str:
+            raise AssertionError("mismatch path must cancel, never re-interrupt")
+
+    ctx.pending_approval_digest = "captured-before-the-pause"  # state then mutated
+    hook = AttorneyApprovalHook(ctx)
+    event = FakeEvent()
+    hook._approve(event)  # type: ignore[arg-type]
+
+    assert event.cancel_tool is not None
+    assert ctx.approval_invalidated
+    report = _report(ctx, mode="test")
+    assert "A-1" in report.failures  # nobody resolved it; it cannot vanish
+    assert not report.succeeded
+
+
+def test_invalidated_approval_gets_the_pending_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """After an invalidation the unattended floor owes the candidates a
+    pending-review commit, exactly as if no decision existed; the run stays
+    failed (backstop) but no case is lost."""
+    from strands.multiagent import Status
+
+    import agent.graph as graph_module
+    from agent.runner import run_live
+
+    ctx = seed_ctx(tmp_path)
+
+    class InvalidatedResult:
+        def __init__(self) -> None:
+            self.status = Status.COMPLETED
+            self.interrupts: list[object] = []
+
+    def fake_graph(inner_ctx: RunContext, plugins: object = None) -> object:
+        def run(_payload: object) -> InvalidatedResult:
+            # Simulate the hook voiding the exchange mid-run.
+            inner_ctx.attorney_action = "deferred"
+            inner_ctx.approval_invalidated = True
+            return InvalidatedResult()
+
+        return run
+
+    monkeypatch.setattr(graph_module, "build_triage_graph", fake_graph)
+    report = run_live(ctx, attorney_response="approve")
+
+    assert report.backstop_used
+    assert report.attorney_action == "pending"
+    assert len(report.committed) == 2  # the sweep still delivered, as pending
+    assert report.failures == ()
+    assert not report.succeeded

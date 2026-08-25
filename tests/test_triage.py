@@ -319,3 +319,33 @@ def test_ambiguities_and_low_confidence_floor_independently() -> None:
         decisions = decide([make_signal_case("C1", FAR_OUT, **kwargs)])  # type: ignore[arg-type]
         assert decisions["C1"].level is UrgencyLevel.L2_SURFACE_TODAY
         assert reason in decisions["C1"].raised_by
+
+
+# --- Round-9 reproducers: unmapped engine flags must never dissolve -----------
+
+
+def test_unknown_service_method_flag_floors_at_surface_today() -> None:
+    """Round-9 reproducer: five days out with ServiceMethod.UNKNOWN became
+    a bare monitor row with empty raised_by; the engine's uncertainty flag
+    disappeared from the review surface."""
+    decisions = decide([make_case("U1", date(2026, 8, 10), method=ServiceMethod.UNKNOWN)])
+    decision = decisions["U1"]
+    assert decision.level is UrgencyLevel.L2_SURFACE_TODAY
+    assert "engine_flag_unknown_service_method" in decision.raised_by
+    assert any("unknown_service_method" in f for f in decision.factors)
+    assert "unknown_service_method" in decision.flags
+
+
+def test_amended_affidavit_flag_floors_at_surface_today() -> None:
+    decisions = decide([make_case("A9", date(2026, 8, 10), amended_affidavit=True)])
+    decision = decisions["A9"]
+    assert decision.level is UrgencyLevel.L2_SURFACE_TODAY
+    assert "engine_flag_amended_affidavit" in decision.raised_by
+    assert "amended_affidavit" in decision.flags
+
+
+def test_every_decision_carries_raw_flag_codes() -> None:
+    """The ranked review surface shows every uncertainty the engine
+    recorded, mapped or not."""
+    decisions = decide([make_case("T1", date(2026, 8, 10), method=ServiceMethod.TACK_AND_MAIL)])
+    assert any("tack_and_mail" in flag for flag in decisions["T1"].flags)

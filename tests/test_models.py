@@ -127,6 +127,10 @@ ADVICE_PAYLOADS = [
     "F1le an answer today",  # digit-for-letter substitution
     "F i l e an answer today",  # spaced-out letters
     "The deadline\x00 passed with no answer.",  # raw control character
+    # Round-9 reproducers: composed evasions (spacing + leet, punctuation)
+    "F 1 l e an answer today",
+    "Y 0 u should file an answer today",
+    "F.i.l.e an answer today",
 ]
 
 

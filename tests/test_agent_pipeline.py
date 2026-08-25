@@ -185,19 +185,25 @@ def test_packet_memo_only_for_committed_and_no_advice(tmp_path: Path) -> None:
         rationale="Deadline passed with no answer on file; writ exposure is live.",
         confidence=0.9,
     )
-    assert "NOT COMMITTED" in tools["write_packet_memo"](case_id=interrupt_id, memo="memo")
+    assert "NOT COMMITTED" in tools["write_packet_memo"](case_id=interrupt_id, notes="")
     ctx.attorney_action = "approved"
     bind_approval(ctx, tuple(d.case_id for d in ctx.interrupt_candidates))
     tools["commit_escalations"]()
     poisoned = tools["write_packet_memo"](
-        case_id=interrupt_id, memo="The tenant should raise the defense of tender."
+        case_id=interrupt_id, notes="The tenant should raise the defense of tender."
     )
     assert "VALIDATION FAILED" in poisoned
     assert interrupt_id not in ctx.packet_memos
     assert "recorded" in tools["write_packet_memo"](
-        case_id=interrupt_id, memo="Deadline was 2026-09-08; rank 1 of 1; confirm intake facts."
+        case_id=interrupt_id, notes="Confirm the mailing date with the tenant."
     )
-    duplicate = tools["write_packet_memo"](case_id=interrupt_id, memo="A second memo.")
+    # Round-9: the fact sheet is deterministic; every number and date comes
+    # from engine state, and the drafter's contribution is labeled notes.
+    memo = ctx.packet_memos[interrupt_id]
+    deadline = ctx.deadlines[interrupt_id]
+    assert f"Effective deadline {deadline.effective_deadline}." in memo
+    assert "Reviewer notes: Confirm the mailing date with the tenant." in memo
+    duplicate = tools["write_packet_memo"](case_id=interrupt_id, notes="A second memo.")
     assert "ALREADY RECORDED" in duplicate
 
 

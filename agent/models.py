@@ -177,6 +177,15 @@ def _strip_marks(text: str) -> str:
     )
 
 
+# Single alphanumerics separated by punctuation ("f.i.l.e", "f-i-l-e"):
+# collapse the run by dropping the separators. Matching shadow only.
+_SEPARATED_RUN = re.compile(r"(?<![0-9a-z])(?:[0-9a-z][^0-9a-z\s]){2,}[0-9a-z](?![0-9a-z])")
+
+
+def _collapse_separated_letters(text: str) -> str:
+    return _SEPARATED_RUN.sub(lambda m: re.sub(r"[^0-9a-z]", "", m.group(0)), text)
+
+
 def _collapse_spaced_letters(text: str) -> str:
     """Collapse runs of two-plus single-letter tokens ('F i l e') into one
     word so spacing cannot hide an imperative. Matching shadow only."""
@@ -262,14 +271,22 @@ def _reject_advice_language(text: str, field_name: str) -> str:
             f"{mixed!r}; this floor cannot read it reliably and fails closed"
         )
     # Every check runs over each matching shadow: the text as normalized,
-    # diacritic-stripped, leet-folded, and space-collapsed. A payload must
-    # evade all of them; delivered text is always the original.
+    # diacritic-stripped, leet-folded, space-collapsed, AND the canonical
+    # composition of all of them (round 9: 'F 1 l e' evaded the independent
+    # shadows because spacing and leet each individually resolved; the
+    # composed shadow closes combined evasions). Delivered text is always
+    # the original.
     demarked = _strip_marks(normalized)
+    canonical = _collapse_spaced_letters(
+        _collapse_separated_letters(demarked.translate(_LEET_FOLD))
+    )
     for variant in {
         normalized,
         demarked,
         demarked.translate(_LEET_FOLD),
         _collapse_spaced_letters(demarked),
+        _collapse_separated_letters(demarked),
+        canonical,
     }:
         _scan_variant(variant, field_name)
     return text
