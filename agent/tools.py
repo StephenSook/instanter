@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from strands import tool
 
 from agent.audit import AuditEvent
-from agent.models import EscalationRationale, ExtractedObservations
+from agent.models import LOW_CONFIDENCE_THRESHOLD, EscalationRationale, ExtractedObservations
 from agent.run_context import RunContext
 from agent.store import EscalationRecord, IntakeParseError, to_case_input
 from agent.triage import TriageCase, triage_queue
@@ -133,6 +133,7 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 # the rows that parsed. It becomes a case-level refusal a
                 # human resolves, loudly audited, surfaced in the output.
                 refused.append({"case_id": record.case_id, "reason": str(exc)})
+                ctx.refused_cases[record.case_id] = str(exc)
                 ctx.audit.append(
                     AuditEvent(
                         kind="case_refused",
@@ -186,6 +187,10 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                     ),
                     observation_needs_confirmation=(
                         bool(obs.needs_human_confirmation) if obs else False
+                    ),
+                    observation_has_ambiguities=bool(obs.ambiguities) if obs else False,
+                    observation_low_confidence=(
+                        obs.confidence < LOW_CONFIDENCE_THRESHOLD if obs else False
                     ),
                 )
             )
@@ -327,11 +332,16 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
             return "MISSING RATIONALES: submit_escalation_rationale first for: " + ", ".join(
                 missing
             )
-        # Idempotent by construction: cases already durably written this run
-        # (a prior call, or a retry after partial failure) are never written
-        # twice. A second call with nothing left to write is refused.
-        already = list(ctx.committed_case_ids)
-        to_write = [d for d in ctx.interrupt_candidates if d.case_id not in already]
+        # Idempotent against DURABLE state, not in-memory state: an
+        # ambiguous store failure (the row landed, then fsync raised) leaves
+        # ctx.committed_case_ids behind reality, and trusting it would
+        # duplicate rows on retry. Reconcile from the store first; the store
+        # is the truth about what committed.
+        stored_ids = {e.case_id for e in ctx.store.list_escalations(run_id=ctx.run_id)}
+        durable = set(ctx.committed_case_ids) | stored_ids
+        already = [d.case_id for d in ctx.interrupt_candidates if d.case_id in durable]
+        ctx.committed_case_ids = tuple(already)
+        to_write = [d for d in ctx.interrupt_candidates if d.case_id not in durable]
         if not to_write:
             ctx.audit.append(
                 AuditEvent(

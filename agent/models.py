@@ -13,7 +13,12 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Below this confidence an extraction is not trustworthy enough to stand
+# without a human: the validator forces needs_human_confirmation, and the
+# triage policy independently floors on it (defense in depth).
+LOW_CONFIDENCE_THRESHOLD = 0.6
 
 # Advice-language boundary: the hard RUNTIME FLOOR, not the guarantee. No
 # blocklist is complete; the guarantee in this system is architectural (a
@@ -137,6 +142,25 @@ class ExtractedObservations(BaseModel):
         for item in value:
             _reject_advice_language(item, "ambiguities")
         return value
+
+    @model_validator(mode="after")
+    def _uncertainty_requires_confirmation(self) -> ExtractedObservations:
+        # Cross-field invariant: an extraction cannot simultaneously declare
+        # open questions (or low confidence) AND claim no human is needed.
+        # That contradiction is exactly the shape that bypasses a fail-closed
+        # floor while remaining schema-valid field by field.
+        if self.ambiguities and not self.needs_human_confirmation:
+            raise ValueError(
+                "ambiguities are listed but needs_human_confirmation is "
+                "false; open questions require needs_human_confirmation=true"
+            )
+        if self.confidence < LOW_CONFIDENCE_THRESHOLD and not self.needs_human_confirmation:
+            raise ValueError(
+                f"confidence {self.confidence} is below "
+                f"{LOW_CONFIDENCE_THRESHOLD}; a low-confidence extraction "
+                "requires needs_human_confirmation=true"
+            )
+        return self
 
 
 class EffortEstimate(BaseModel):

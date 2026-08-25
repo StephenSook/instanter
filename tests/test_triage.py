@@ -306,3 +306,16 @@ def test_confirmed_hold_is_not_resurrected_by_note_signals() -> None:
         ]
     )
     assert decisions["C1"].level is UrgencyLevel.L0_HOLD
+
+
+def test_ambiguities_and_low_confidence_floor_independently() -> None:
+    """Defense in depth: even if a contradictory observation slipped past
+    the model validator, open questions and low confidence each floor at
+    L2 on their own, whatever the model claimed about confirmation."""
+    for kwargs, reason in [
+        ({"observation_has_ambiguities": True}, "open_questions"),
+        ({"observation_low_confidence": True}, "low_confidence_extraction"),
+    ]:
+        decisions = decide([make_signal_case("C1", FAR_OUT, **kwargs)])  # type: ignore[arg-type]
+        assert decisions["C1"].level is UrgencyLevel.L2_SURFACE_TODAY
+        assert reason in decisions["C1"].raised_by

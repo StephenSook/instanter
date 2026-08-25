@@ -150,3 +150,35 @@ def test_hardened_floor_passes_factual_statements(payload: str) -> None:
         confidence=0.9,
     )
     assert rationale.rationale == payload
+
+
+# --- Cross-field uncertainty invariants ---------------------------------------
+
+
+def test_ambiguities_without_confirmation_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="needs_human_confirmation"):
+        ExtractedObservations(
+            summary="The hearing date in the notes is uncertain.",
+            ambiguities=["Which hearing date is correct?"],
+            needs_human_confirmation=False,
+            confidence=0.9,
+        )
+
+
+def test_low_confidence_without_confirmation_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="low-confidence"):
+        ExtractedObservations(
+            summary="Notes are hard to interpret.",
+            needs_human_confirmation=False,
+            confidence=0.1,
+        )
+
+
+def test_uncertainty_with_confirmation_is_accepted() -> None:
+    obs = ExtractedObservations(
+        summary="The hearing date in the notes is uncertain.",
+        ambiguities=["Which hearing date is correct?"],
+        needs_human_confirmation=True,
+        confidence=0.4,
+    )
+    assert obs.needs_human_confirmation
