@@ -89,14 +89,13 @@ def parse_attorney_response(response: object) -> tuple[str, str]:
     """Strict, fail-closed parse of an attorney response.
 
     Returns (action, reason) where action is "approved", "deferred", or
-    "invalid". Only an EXACT approval approves: qualifiers and typos in a
-    real response defer, because a conditional approval flattened into
-    blanket approval is a UPL-grade audit failure while an over-deferral
-    only delays review. But an EMPTY or NON-STRING value is not a human
-    decision at all: it is "invalid", and the caller must treat the
-    exchange as unresolved (pending review, never a green no-op), because
-    a transport bug that reads as a deferral would silently drop urgent
-    cases from the durable queue.
+    "invalid". Only an EXACT approval approves and only an EXPLICIT
+    "defer..." defers; everything else (empty, non-string, a typo, a
+    conditional, an ambiguity) is "invalid" and the caller must treat the
+    exchange as unresolved: pending review, never a green no-op. A
+    conditional flattened into blanket approval is a UPL-grade audit
+    failure; a near-miss flattened into a green deferral silently drops
+    urgent cases from the durable queue.
     """
     if not isinstance(response, str):
         return "invalid", f"response must be a string, got {type(response).__name__}"
@@ -108,9 +107,17 @@ def parse_attorney_response(response: object) -> tuple[str, str]:
         return "approved", "exact approval"
     if normalized.startswith("defer"):
         return "deferred", "explicit deferral"
+    # A near-miss ("aprove", "yes", a conditional approval) is NOT a
+    # decision either way: flattening it into blanket approval is a
+    # UPL-grade failure, and flattening it into a green deferral let a
+    # typo'd scheduler wrapper produce perpetual green no-op runs with
+    # nothing durable recorded (round 17). Invalid = the exchange stays
+    # unresolved: the floor delivers the sweep as pending review and the
+    # run reads red until a real response resolves it.
     return (
-        "deferred",
-        "response was not an exact approval; treated as deferral (fail closed)",
+        "invalid",
+        "response was not an exact approval or an explicit deferral; "
+        "not treated as a decision (fail closed)",
     )
 
 

@@ -330,3 +330,27 @@ def test_modal_may_is_legitimate_hedge_language() -> None:
     assert reject_model_numerics("service may be defective", "notes")
     with pytest.raises(ValueError):
         reject_model_numerics("The answer is due by May.", "notes")
+
+
+def test_month_may_rejected_in_every_casing_modal_stays_legal() -> None:
+    """Round-17 reproducer: the month ban was casing-exact, so 'DUE BY
+    MAY' and 'due by may' delivered fabricated date words while the
+    sentence-initial modal 'May service have been defective' was a false
+    positive. Month recognition is by date context on casefolded shadows."""
+    from agent.models import reject_model_numerics
+
+    for poisoned in (
+        "THE HEARING IS IN MAY.",
+        "the filing is due by may.",
+        "rent was withheld since may",
+        "the notice arrived in mAy",
+        "expected in mid-May",
+    ):
+        with pytest.raises(ValueError):
+            reject_model_numerics(poisoned, "notes")
+    assert reject_model_numerics("the tenant may have moved", "notes")
+    assert reject_model_numerics("May service have been defective is unclear", "notes")
+    assert reject_model_numerics("service may be defective", "notes")
+    # Round-17 LOW: system-vocabulary words no longer starve the writers.
+    assert reject_model_numerics("the ladder does not use a score; it ranks", "notes")
+    assert reject_model_numerics("on the eve of the hearing the notes were read", "notes")
