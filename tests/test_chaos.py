@@ -631,6 +631,10 @@ def test_post_approval_failure_recovers_through_the_floor(
     assert not report.succeeded  # the model death still fails the run
     stored = ctx.store.list_escalations(run_id=ctx.run_id)
     assert sorted(e.case_id for e in stored) == sorted(report.committed)
+    # The attorney packet is complete: recovered cases carry template memos.
+    assert report.missing_memos == ()
+    assert all(cid in ctx.packet_memos for cid in report.committed)
+    assert all("[MODEL DISABLED" in ctx.packet_memos[cid] for cid in report.committed)
 
 
 def test_concurrent_same_run_writers_never_duplicate_an_escalation(tmp_path: Path) -> None:
