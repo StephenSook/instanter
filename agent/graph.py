@@ -21,6 +21,7 @@ from strands import Agent
 from strands.models import BedrockModel
 from strands.multiagent import GraphBuilder
 from strands.multiagent.graph import Graph
+from strands.tools.executors import SequentialToolExecutor
 
 from agent.hooks import AttorneyApprovalHook, AuditToolHook
 from agent.run_context import RunContext
@@ -92,6 +93,7 @@ def build_triage_graph(ctx: RunContext, plugins: list[Any] | None = None) -> Gra
         tools=[tools["list_cases_with_notes"], tools["submit_case_observations"]],
         hooks=[audit_hook],
         plugins=list(shared_plugins),
+        tool_executor=SequentialToolExecutor(),
         callback_handler=None,
     )
     writer = Agent(
@@ -105,6 +107,7 @@ def build_triage_graph(ctx: RunContext, plugins: list[Any] | None = None) -> Gra
         ],
         hooks=[audit_hook, approval_hook],
         plugins=list(shared_plugins),
+        tool_executor=SequentialToolExecutor(),
         callback_handler=None,
     )
     drafter = Agent(
@@ -114,6 +117,7 @@ def build_triage_graph(ctx: RunContext, plugins: list[Any] | None = None) -> Gra
         tools=[tools["write_packet_memo"]],
         hooks=[audit_hook],
         plugins=list(shared_plugins),
+        tool_executor=SequentialToolExecutor(),
         callback_handler=None,
     )
 

@@ -50,6 +50,12 @@ class RunReport:
 
 
 def _load_records(ctx: RunContext) -> None:
+    if ctx.started:
+        raise RuntimeError(
+            f"RunContext {ctx.run_id} already carried a run; contexts are "
+            "single-use. Construct a fresh context (and run_id) per invocation."
+        )
+    ctx.started = True
     for record in ctx.store.load_intake():
         ctx.records[record.case_id] = record
     ctx.audit.append(
