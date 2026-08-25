@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Instanter privacy policy</title>
+    <meta
+      name="description"
+      content="What Instanter collects, which is nothing about you, and why."
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --ground: #141414;
+        --paper: #faf6f0;
+      }
+      body {
+        margin: 0;
+        padding: 3rem 1.25rem 5rem;
+        background: var(--ground);
+        color: var(--paper);
+        font-family: ui-serif, Georgia, "Times New Roman", serif;
+        line-height: 1.6;
+      }
+      main { max-width: 42rem; margin: 0 auto; }
+      h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 0.25rem; }
+      h2 { font-size: 1.1rem; margin: 2.25rem 0 0.5rem; }
+      .kicker,
+      .meta,
+      a { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; }
+      .kicker { font-size: 0.7rem; letter-spacing: 0.2em; text-transform: uppercase; color: #a8a8a8; }
+      .meta { font-size: 0.78rem; color: #a8a8a8; }
+      a { color: var(--paper); }
+      ul { padding-left: 1.1rem; }
+      li { margin-bottom: 0.4rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="kicker">Instanter</p>
+      <h1>Privacy policy</h1>
+      <p class="meta">Last updated 25 August 2026.</p>
+
+      <p>
+        Instanter is a deadline-triage tool for eviction-defence clinics. This policy covers
+        the website at this domain and the Instanter mobile app.
+      </p>
+
+      <h2>What is collected about you</h2>
+      <p>
+        Nothing. There are no accounts, no sign-in, no analytics, no advertising identifiers,
+        no tracking pixels, and no third-party trackers. Nothing you do here is associated
+        with you as a person, because nothing here knows who you are.
+      </p>
+
+      <h2>What the app sends</h2>
+      <p>
+        The app and the website call one public endpoint on this domain to run a triage sweep
+        over a fixed, synthetic demonstration dataset, and to record whether you chose to
+        approve or defer that sweep. The request contains no personal information: it carries
+        a capacity number and, when you answer, the word you chose.
+      </p>
+
+      <h2>What is stored</h2>
+      <ul>
+        <li>
+          The outcome of a demonstration run, keyed by a random identifier, so the page can
+          show you the result. It expires automatically within seven days.
+        </li>
+        <li>
+          A per-day count of how many runs have been started, so a public endpoint that calls
+          a paid model cannot be run without limit. It is a number, not a list of people.
+        </li>
+        <li>
+          Ordinary server request logs kept by Amazon Web Services, which hosts this service.
+        </li>
+      </ul>
+
+      <h2>The case records are not real people</h2>
+      <p>
+        Every case record shown in Instanter is synthetic and labelled as such in the data
+        itself. No tenant, landlord, attorney, or court record belonging to a real person is
+        present. The statute, the court calendar, and every computation are real; the people
+        are not.
+      </p>
+
+      <h2>Who it is shared with</h2>
+      <p>
+        Nobody. Nothing is sold, rented, or shared. The service runs on Amazon Web Services,
+        which processes requests on our behalf as an infrastructure provider.
+      </p>
+
+      <h2>Children</h2>
+      <p>
+        Instanter is a professional tool for legal-aid staff and is not directed at children.
+      </p>
+
+      <h2>Legal information, not legal advice</h2>
+      <p>
+        Instanter states operative facts and computes statutory deadlines for review by a
+        licensed attorney. It does not provide legal advice and it is not a substitute for a
+        lawyer.
+      </p>
+
+      <h2>Contact</h2>
+      <p class="meta">
+        Stephen Sookra ·
+        <a href="mailto:stephensookra@gmail.com">stephensookra@gmail.com</a><br />
+        Source: <a href="https://github.com/StephenSook/instanter">github.com/StephenSook/instanter</a>
+      </p>
+      <p class="meta"><a href="/">Back to Instanter</a></p>
+    </main>
+  </body>
+</html>
