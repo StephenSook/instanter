@@ -74,6 +74,7 @@ out/
 infra/.venv-cdk/
 infra/cdk.out/
 infra/build/
+mobile/.easrc
 infra/.door-secret
 # deploy outputs: the CloudFront URL is public, the Function URL need not be
 infra/cdk-outputs.json
