@@ -425,20 +425,20 @@ _NUMBER_WORDS = frozenset(
         "today",
         "tomorrow",
         "yesterday",
-        "weekend",
         # Holiday names are exact calendar dates ("due by Christmas" is a
-        # fabricated deadline as surely as a digit). Low-collision names
-        # only; "week" and "month" stay LEGAL as an accepted residual (they
-        # saturate honest factual prose, and the deterministic fact sheet
-        # with the true count sits beside any duration a model writes).
+        # fabricated deadline as surely as a digit). LOW-COLLISION names
+        # only: "memorial", "veterans", "independence", and "weekend" were
+        # tried and rejected in round 19 (Memorial Drive is a major Fulton
+        # eviction corridor, Veterans Affairs housing is real intake prose,
+        # and courthouse-closed-over-the-weekend is honest service
+        # context). "week" and "month" stay LEGAL for the same saturation
+        # reason; the deterministic fact sheet with the true count sits
+        # beside any duration a model writes.
         "christmas",
         "thanksgiving",
         "juneteenth",
         "easter",
         "halloween",
-        "memorial",
-        "veterans",
-        "independence",
     ]
 )
 # Month "may" versus modal "may": the modal is the models' most natural
@@ -453,20 +453,38 @@ _MODAL_CONTINUATIONS = (
     "needs|reflect|reflects|indicate|indicates|differ|differs|apply|applies|"
     "exist|exists|remain|remains|suggest|suggests|show|shows|warrant|"
     "warrants|prove|proves|affect|affects|change|changes|move|moves|turn|"
-    "turns|depend|depends|vary|varies|mean|means|matter|matters"
+    "turns|depend|depends|vary|varies|mean|means|matter|matters|"
+    # Round 19: hedge verbs one step outside the original list kept false
+    # positive on "the defect complained of may <verb>..." relative
+    # clauses; adverb and conjunction continuations ("may well", "may or
+    # might not", "may in fact") are modal frames too.
+    "invalidate|invalidates|amount|amounts|constitute|constitutes|lack|"
+    "lacks|arise|arises|occur|occurs|happen|happens|follow|follows|come|"
+    "become|becomes|present|presents|involve|involves|extend|extends|"
+    "delay|delays|explain|explains|render|renders|entitle|entitles|"
+    "justify|justifies|support|supports|undermine|undermines|excuse|"
+    "excuses|void|voids|hinge|hinges|bear|bears|well|or|even|yet|thus|"
+    "therefore|instead|in|fact|simply|only|merely"
+)
+_MAY_MONTH_NOUNS = (
+    "hearing|hearings|deadline|deadlines|docket|dockets|calendar|"
+    "calendars|term|terms|session|sessions|date|dates|cycle|cycles|court"
 )
 _MAY_DATE_CONTEXT = re.compile(
     # Preposition/qualifier + may, NOT followed by a modal continuation
     # ("due by May" is the month; "described by may already be on file" is
     # the modal). "this" is deliberately absent: "this may reflect..." is
     # the commonest hedge frame and "this May" the rarest month frame.
-    r"\b(?:in|by|since|until|before|after|during|of|from|next|last|early|late|mid)"
+    r"\b(?:in|by|since|until|before|after|during|of|from|for|to|into|through"
+    r"|next|last|early|late|mid)"
     rf"[\s-]+may\b(?!\s+(?:{_MODAL_CONTINUATIONS})\b)"
-    # Attributive month: "the May hearing", "the May deadline".
-    r"|\bthe[\s-]+may[\s-]+(?:hearing|deadline|docket|calendar|term|session|date|cycle)\b"
-    # Month-first and idiomatic frames: "May arrives", "come May",
-    # "when/once May begins".
+    # Attributive month with articles and plurals: "the May hearings",
+    # "a May court date".
+    rf"|\b(?:the|a|an|each|every|any)[\s-]+may[\s-]+(?:{_MAY_MONTH_NOUNS})\b"
+    # Month-first, possessive, and idiomatic frames: "May arrives",
+    # "May's docket", "come May".
     r"|\bmay[\s-]+(?:arrives|arrive|begins|begin|starts|start|ends|end)\b"
+    r"|\bmay's\b"
     r"|\bcome[\s-]+may\b"
 )
 _WORD_TOKEN = re.compile(r"[a-z]+")

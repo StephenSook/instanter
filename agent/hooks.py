@@ -106,25 +106,21 @@ def parse_attorney_response(response: object) -> tuple[str, str]:
     normalized = detail.lower().rstrip(".!")
     if normalized in ("approve", "approved", "approve all"):
         return "approved", "exact approval"
-    # Deferral is as strict as approval: an exact defer word, or a defer
-    # word followed by a reason. A bare prefix match flattened
-    # NON-deferrals into clean green deferrals ("Deferring to your
-    # judgment, approve all", "deference to...", "deferred maintenance
-    # noted; approve"), which resolved urgent cases with nobody's
-    # decision. And a response carrying BOTH defer and approve language
-    # is a conditional no parser may adjudicate: invalid, exchange
-    # unresolved, pending floor, red.
-    is_deferral_shaped = normalized in ("defer", "deferred") or normalized.startswith(
-        ("defer:", "defer ", "deferred:", "deferred ")
-    )
-    if is_deferral_shaped:
-        response_words = set(re.findall(r"[a-z]+", normalized))
-        if response_words & {"approve", "approved", "approval", "approving"}:
-            return (
-                "invalid",
-                "response mixes deferral and approval language; not treated "
-                "as a decision (fail closed)",
-            )
+    # Deferral is a STRUCTURED channel, not free prose: exactly "defer" /
+    # "deferred", or the colon form "defer: <reason>". Round 18 tried to
+    # adjudicate free-text deferrals by token-matching approval words and
+    # lost twice in one round: synonyms sailed through ("defer nothing,
+    # commit them all" parsed as a clean green deferral) and the runner's
+    # own synthetic deferral text ("...a fresh approval is required") was
+    # friendly-fired into invalid. A parser cannot adjudicate intent; it
+    # can require a channel. The space form ("defer the rest, approve
+    # only X") is therefore NOT a deferral: invalid, exchange unresolved,
+    # pending floor, red. A colon-form reason is a deferral by explicit
+    # channel choice, whatever prose follows; the verbatim words are
+    # audited and reviewed by the console human. Deferral reasons that
+    # MENTION approval ("defer: needs partner approval first") are
+    # legitimate and no longer false-positive.
+    if normalized in ("defer", "deferred") or re.match(r"^defer(?:red)?\s*:", normalized):
         return "deferred", "explicit deferral"
     # A near-miss ("aprove", "yes", a conditional approval) is NOT a
     # decision either way: flattening it into blanket approval is a
@@ -253,7 +249,7 @@ class AttorneyApprovalHook(HookProvider):
             reason={
                 "question": (
                     "Approve committing these escalations for review? "
-                    "Reply 'approve' or 'defer: <reason>'."
+                    "Reply exactly 'approve', or 'defer: <reason>'."
                 ),
                 "escalations": candidates,
                 "run_id": self._ctx.run_id,
@@ -286,7 +282,8 @@ class AttorneyApprovalHook(HookProvider):
             )
             event.cancel_tool = (
                 f"INVALID RESPONSE: {reason}. The commit was not executed; "
-                "the sweep will be delivered as pending attorney review."
+                "the sweep will be delivered as pending attorney review. Do "
+                "NOT retry commit_escalations; stop and reply DEFERRED."
             )
             return
         self._ctx.attorney_action = action

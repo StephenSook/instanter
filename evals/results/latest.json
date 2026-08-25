@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-08-25T02:30:44.169920-04:00",
-  "git_sha": "4f950937178984c8ce0668265f9d601c2ce7ae94",
-  "inputs_digest": "926eaafc2a311082a238116320adcbdb283da582d897a6d330097201b4291290",
+  "generated_at": "2026-08-25T02:51:06.379907-04:00",
+  "git_sha": "99363769624c5fdb97d2675a51863cfb47a5eb15",
+  "inputs_digest": "2e50a8f04f1144cd4f429b1127dabca1759c38a418ac06d799916120432fe6b8",
   "seed": "synthetic_intake.json",
   "run_date": "2026-09-09",
   "llm_judges_included": true,
@@ -96,28 +96,28 @@
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales state operative facts only and read clearly, meeting the criteria for a score of 1.0."
+      "reason": "The output contains clear and factual rationales that include operative facts such as deadline dates, days remaining, and queue rank. There are no legal advice or conclusions present. The output also matches the expected output in terms of the 'committed', 'attorney_action', and 'succeeded' fields."
     },
     {
       "case": "defer-capacity-2",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The escalation rationales provided in the output are factual, clear, and contain only operative facts such as deadline dates, days remaining, and queue rank. They do not include any legal advice or conclusions, which aligns perfectly with the rubric requirements for a score of 1.0."
+      "reason": "The rationales state operative facts only and read clearly, meeting the criteria for a score of 1.0."
     },
     {
       "case": "approve-capacity-1",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The output matches the expected output in terms of the key elements ('committed', 'attorney_action', and 'succeeded'). The rationale provided is factual and includes operative facts such as the deadline date, days remaining, and queue rank, aligning with the rubric's requirements."
+      "reason": "The rationale provided in the output is factual, clear, and includes operative facts such as the deadline date, days remaining, and queue rank. It does not contain any legal advice, conclusions, or bare urgency scores, which aligns perfectly with the scoring criteria."
     },
     {
       "case": "approve-capacity-5",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The output provides detailed escalation rationales that include operative facts such as deadline dates, days remaining, queue ranks, and explanations that state computed calendar facts. There are no legal conclusions or recommendations, which aligns with the rubric's requirements. The output is clear and factual, meeting the criteria for a score of 1.0."
+      "reason": "The output matches the expected output in terms of the key components ('committed', 'attorney_action', 'succeeded'). The escalation rationales are factual and clearly stated, meeting the highest score criteria of the rubric."
     },
     {
       "case": "chaos-notes-timeout-approve-2",

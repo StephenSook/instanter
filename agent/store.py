@@ -288,7 +288,10 @@ class JsonFileCaseStore:
             # of ONE docket, and both rows must be contested, never swept
             # as two urgent cases holding two capacity slots. Dedup contest
             # only; stored ids are never rewritten.
-            confusables = str.maketrans("oli", "011")
+            # o->0, l/i->1, s->5, b->8, z->2: the hand-keying and OCR
+            # confusable family (round 19 reproduced the S-for-5 twin
+            # taking a capacity slot exactly as the O-for-0 twin had).
+            confusables = str.maketrans("olisbz", "011582")
             return "".join(case_id.split()).casefold().translate(confusables)
 
         counts: dict[str, int] = {}

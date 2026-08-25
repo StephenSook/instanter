@@ -367,8 +367,9 @@ def test_attorney_response_parsing_is_strict_and_fail_closed() -> None:
 
     deferrals = [
         "defer: in hearings",
-        "Defer until tomorrow's calendar clears",
+        "defer: needs partner approval first",  # reasons may MENTION approval
         "DEFERRED.",
+        "Deferred: counsel is in court",
     ]
     for probe in deferrals:
         action, _ = parse_attorney_response(probe)
@@ -2037,9 +2038,21 @@ def test_defer_prefix_cannot_swallow_approvals_or_non_deferrals(tmp_path: Path) 
         action, _ = parse_attorney_response(probe)
         assert action == "invalid", probe
 
-    for probe in ("defer", "DEFERRED.", "defer: in hearings", "Defer until the calendar clears"):
+    for probe in ("defer", "DEFERRED.", "defer: in hearings"):
         action, _ = parse_attorney_response(probe)
         assert action == "deferred", probe
+    # Round-19: the SPACE form is not a deferral channel at all; free prose
+    # after a bare "defer " is unadjudicable ("defer nothing, commit them
+    # all" parsed as a clean green deferral one synonym past the round-18
+    # token check).
+    for probe in (
+        "Defer until the calendar clears",
+        "defer nothing, commit them all",
+        "Defer nothing; escalate them all",
+        "Deferred maintenance noted in the file",
+    ):
+        action, _ = parse_attorney_response(probe)
+        assert action == "invalid", probe
 
     ctx = seed_ctx(tmp_path)
     report = run_deterministic(ctx, attorney_response="Deferring to your judgment, approve all")
@@ -2107,3 +2120,98 @@ def test_summons_conflict_memo_carries_both_dates(tmp_path: Path) -> None:
     memo = ctx.packet_memos["SC-1"]
     assert "summons_date_conflict" in memo
     assert "statutory computation gives" in memo  # the competing date's sentence
+
+
+# --- Round-19 reproducers -----------------------------------------------------
+
+
+def test_space_form_defer_with_commit_intent_never_reads_green(tmp_path: Path) -> None:
+    """Round-19 reproducer: 'defer nothing, commit them all' parsed as a
+    clean human deferral and the run exited 0 green with zero durable
+    rows; urgent cases resolved by nobody."""
+    ctx = seed_ctx(tmp_path)
+    report = run_deterministic(ctx, attorney_response="defer nothing, commit them all")
+    assert ctx.approval_invalidated
+    assert report.failures
+    assert not report.succeeded
+
+
+def test_synthetic_single_use_deferral_still_parses_deferred() -> None:
+    """Round-19 reproducer: the runner's own synthetic second-interrupt
+    answer contains the word 'approval' and the round-18 token check
+    friendly-fired it into invalid, voiding exchanges the runner itself
+    authored."""
+    from agent.hooks import parse_attorney_response
+
+    action, reason = parse_attorney_response(
+        "defer: the single-use attorney response was already consumed this "
+        "run; a fresh approval is required"
+    )
+    assert action == "deferred"
+    assert reason == "explicit deferral"
+
+
+def test_interrupt_loop_is_hard_bounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Round-19 reproducer: a graph interrupting on every execution spun
+    run_live 500+ times (interrupted executions never count toward
+    max_node_executions and the execution timeout resets per resume). The
+    runner now caps interrupt rounds, records a model error, and the
+    floor still delivers."""
+    from strands.multiagent import Status
+
+    import agent.graph as graph_module
+    from agent.runner import run_live
+
+    calls = {"n": 0}
+
+    class FakeInterrupt:
+        id = "int-loop"
+
+    class AlwaysInterrupted:
+        def __call__(self, _payload: object) -> object:
+            calls["n"] += 1
+
+            class R:
+                def __init__(self) -> None:
+                    self.status = Status.INTERRUPTED
+                    self.interrupts = [FakeInterrupt()]
+
+            return R()
+
+    monkeypatch.setattr(
+        graph_module, "build_triage_graph", lambda ctx, plugins=None: AlwaysInterrupted()
+    )
+    ctx = seed_ctx(tmp_path)
+    report = run_live(ctx, attorney_response="approve")
+    assert calls["n"] <= 6  # initial call + capped resumes, never hundreds
+    assert "interrupt limit" in report.model_error
+    assert report.backstop_used  # the floor still delivered the sweep
+    assert len(report.committed) == 2
+    assert not report.succeeded
+
+
+def test_s_for_five_docket_twin_is_contested(tmp_path: Path) -> None:
+    """Round-19 reproducer: '26ED0010S' beside '26ED00105' swept as two
+    urgent cases and displaced a genuinely distinct 0-days case under a
+    green run; the confusable fold now covers s/5, b/8, z/2."""
+    intake = _write_intake(
+        tmp_path,
+        [
+            {
+                "case_id": "26ED00105",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+            {
+                "case_id": "26ED0010S",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+        ],
+    )
+    store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
+    result = store.load_intake()
+    assert result.records == ()
+    assert any("more than once" in m.reason for m in result.malformed)
