@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   ActivityIndicator,
+  Linking,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -128,6 +129,13 @@ export default function App() {
             <Text style={s.fine}>
               Case records are synthetic and labelled as such. The statute, the court calendar,
               and every computation are real.
+            </Text>
+            <Text
+              style={s.link}
+              accessibilityRole="link"
+              onPress={() => Linking.openURL(`${DOOR}/privacy.html`)}
+            >
+              Privacy policy
             </Text>
           </View>
         )}
@@ -259,6 +267,12 @@ const s = StyleSheet.create({
   h1: { color: PAPER, fontSize: 30, fontWeight: "800", lineHeight: 34, marginBottom: 10 },
   body: { color: "rgba(255,255,255,0.86)", fontSize: 16, lineHeight: 23, marginBottom: 14 },
   fine: { color: "rgba(255,255,255,0.6)", fontSize: 12, lineHeight: 18, marginTop: 12 },
+  link: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 12,
+    marginTop: 14,
+    textDecorationLine: "underline",
+  },
   center: { alignItems: "center", paddingVertical: 60, gap: 18 },
   centerText: { textAlign: "center" },
   primary: {

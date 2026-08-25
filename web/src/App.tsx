@@ -129,6 +129,11 @@ export default function App() {
           records shown here are synthetic and labelled as such; the statute, the court calendar, and
           every computation are real.
         </p>
+        <p className="mt-3 font-mono text-[0.66rem] text-white/60">
+          <a href="/privacy.html" className="underline decoration-white/50 hover:text-white/80">
+            Privacy policy
+          </a>
+        </p>
       </footer>
     </div>
   );
