@@ -292,6 +292,11 @@ def _run_graph_case(
         for e in events
         if e["kind"] == "packet_memo_recorded"
     }
+    ambiguities_by_case = {
+        e["case_id"]: list(e["payload"].get("ambiguities", []))
+        for e in events
+        if e["kind"] == "observation_recorded"
+    }
 
     def _memo_grounded(case_id: str, memo: str) -> bool:
         # Typed comparison, not substring luck: a real deadline must appear
@@ -305,7 +310,13 @@ def _run_graph_case(
         else:
             anchored = "No reliable deadline was established" in memo
         notes_tail = memo.split("Reviewer notes:", 1)[1] if "Reviewer notes:" in memo else ""
-        return anchored and not any(ch.isdigit() for ch in notes_tail)
+        # Every recorded intake-analysis ambiguity must reach its case's
+        # packet: silently dropped open questions are information loss the
+        # attorney never sees (round 11).
+        ambiguities_present = all(
+            ambiguity in memo for ambiguity in ambiguities_by_case.get(case_id, [])
+        )
+        return anchored and ambiguities_present and not any(ch.isdigit() for ch in notes_tail)
 
     memos_grounded = all(_memo_grounded(cid, memo) for cid, memo in memos_by_case.items())
     return {

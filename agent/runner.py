@@ -13,8 +13,9 @@ Two modes:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -89,6 +90,23 @@ def _load_records(ctx: RunContext) -> None:
         )
     for record in loaded.records:
         ctx.records[record.case_id] = record
+    # Canonical digest of this invocation's inputs, recorded beside the run
+    # id: a stable id promises the SAME inputs, and an at-least-once retry
+    # over mutated intake is diagnosable from the audit trail alone (the
+    # commit tool independently refuses durable rows outside the retry's
+    # candidate set).
+    inputs_digest = hashlib.sha256(
+        json.dumps(
+            {
+                "run_date": ctx.run_date.isoformat(),
+                "capacity": ctx.attorney_capacity,
+                "records": [asdict(r) for r in sorted(loaded.records, key=lambda r: r.case_id)],
+                "malformed": [[m.row_key, m.reason] for m in loaded.malformed],
+            },
+            sort_keys=True,
+            default=str,
+        ).encode()
+    ).hexdigest()
     ctx.audit.append(
         AuditEvent(
             kind="run_started",
@@ -98,6 +116,7 @@ def _load_records(ctx: RunContext) -> None:
                 "malformed_rows": len(loaded.malformed),
                 "run_date": ctx.run_date.isoformat(),
                 "capacity": ctx.attorney_capacity,
+                "inputs_digest": inputs_digest,
             },
             run_id=ctx.run_id,
         )

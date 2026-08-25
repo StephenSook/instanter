@@ -146,8 +146,7 @@ def test_rationale_requires_interrupt_case_and_exact_echo(tmp_path: Path) -> Non
     refused = tools["submit_escalation_rationale"](
         case_id=monitor_case,
         disposition="monitor",
-        contributing_factors=["far from deadline"],
-        rationale="Not urgent this run.",
+        explanation="Not urgent this run.",
         confidence=0.9,
     )
     assert "NOT AN INTERRUPT CASE" in refused
@@ -155,8 +154,7 @@ def test_rationale_requires_interrupt_case_and_exact_echo(tmp_path: Path) -> Non
     mismatched = tools["submit_escalation_rationale"](
         case_id=interrupt_id,
         disposition="monitor",
-        contributing_factors=["overdue deadline"],
-        rationale="Deadline already passed; default writ exposure is live.",
+        explanation="Deadline already passed; default writ exposure is live.",
         confidence=0.9,
     )
     assert "DISPOSITION MISMATCH" in mismatched
@@ -181,8 +179,7 @@ def test_packet_memo_only_for_committed_and_no_advice(tmp_path: Path) -> None:
     tools["submit_escalation_rationale"](
         case_id=interrupt_id,
         disposition="interrupt",
-        contributing_factors=["deadline overdue"],
-        rationale="Deadline passed with no answer on file; writ exposure is live.",
+        explanation="Deadline passed with no answer on file; writ exposure is live.",
         confidence=0.9,
     )
     assert "NOT COMMITTED" in tools["write_packet_memo"](case_id=interrupt_id, notes="")
@@ -256,3 +253,68 @@ def test_deterministic_run_deferred_commits_nothing(tmp_path: Path) -> None:
     assert report.committed == ()
     assert report.attorney_action == "deferred"
     assert ctx.store.list_escalations(run_id=ctx.run_id) == []
+
+
+# --- Round-11 reproducers -----------------------------------------------------
+
+
+def test_rationale_numbers_come_from_engine_state(tmp_path: Path) -> None:
+    """Round-11 reproducer: a writer probe fabricated 'deadline 2099-12-31,
+    999 days remaining, rank 9' and it persisted. Numeric rationale facts
+    are now deterministic; the model's explanation must carry no digits."""
+    ctx = make_ctx(tmp_path, [make_record(service_date="2026-09-01")], capacity=1)
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    interrupt_id = ctx.interrupt_candidates[0].case_id
+
+    fabricated = tools["submit_escalation_rationale"](
+        case_id=interrupt_id,
+        disposition="interrupt",
+        explanation="The effective deadline is 2099-12-31, with 999 days remaining; queue rank 9.",
+        confidence=0.9,
+    )
+    assert "VALIDATION FAILED" in fabricated
+    assert "no digits" in fabricated
+    assert interrupt_id not in ctx.rationales
+
+    accepted = tools["submit_escalation_rationale"](
+        case_id=interrupt_id,
+        disposition="interrupt",
+        explanation="Deadline has passed with no answer on file; writ exposure is live.",
+        confidence=0.9,
+    )
+    assert "recorded" in accepted
+    stored = ctx.rationales[interrupt_id].rationale
+    deadline = ctx.deadlines[interrupt_id]
+    assert f"Effective deadline {deadline.effective_deadline}." in stored
+    assert "Writer explanation:" in stored
+    assert "2099" not in stored
+
+
+def test_recorded_ambiguities_reach_the_packet_memo(tmp_path: Path) -> None:
+    """Round-11 reproducer: recorded intake ambiguities never reached the
+    committed memos while the run scored 17/17. They are packet facts."""
+    ctx = make_ctx(
+        tmp_path, [make_record(service_date="2026-09-01", notes="conflicting dates")], capacity=1
+    )
+    tools = build_tools(ctx)
+    tools["submit_case_observations"](
+        case_id="26ED00901",
+        summary="Notes mention two different hearing dates.",
+        needs_human_confirmation=True,
+        confidence=0.8,
+        ambiguities=["Which hearing date is correct?"],
+    )
+    tools["get_ranked_queue"]()
+    interrupt_id = ctx.interrupt_candidates[0].case_id
+    tools["submit_escalation_rationale"](
+        case_id=interrupt_id,
+        disposition="interrupt",
+        explanation="Deadline has passed with no answer on file.",
+        confidence=0.9,
+    )
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, (interrupt_id,))
+    tools["commit_escalations"]()
+    tools["write_packet_memo"](case_id=interrupt_id, notes="")
+    assert "Which hearing date is correct?" in ctx.packet_memos[interrupt_id]
