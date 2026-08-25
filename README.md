@@ -6,7 +6,7 @@ A background triage agent for eviction-defense clinics. It watches a clinic's in
 
 ## See it running
 
-**<https://d2ew2t4uldglcr.cloudfront.net>** — no account, no key, no login.
+**<https://d2ew2t4uldglcr.cloudfront.net>**. No account, no key, no login.
 
 **<https://d2ew2t4uldglcr.cloudfront.net/api/stats>** recomputes every answer deadline in the corpus on each request and reports what it found. Nothing there is cached or stored, so the numbers below are measured while you read them:
 
@@ -44,7 +44,7 @@ spikes/    throwaway experiments kept for their findings, not their code
 web/       the operator console (React, Vite, Tailwind), deployed behind CloudFront
 ```
 
-Further directories (bff, infra, console, mobile) land as their phases ship.
+Further directories (bff, mobile) land as their phases ship.
 
 ## Development
 
