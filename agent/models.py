@@ -448,17 +448,34 @@ _NUMBER_WORDS = frozenset(
 # recognized by DATE CONTEXT instead, on the casefolded shadows, so every
 # casing is covered while the modal stays legal: a preposition or a
 # date-qualifier immediately before "may" is the month position.
-# Closed-class tokens that may FOLLOW the month ("in May the hearing was
-# reset"). English verbs are an open class, so enumerating what follows a
-# MODAL was a list that lost a round every time it was widened (round 19
-# added forty verbs and round 20 still found "may reside", "may include",
-# "may consist"). The rule is inverted here: after a preposition, "may" is
-# the MONTH only when a sentence boundary or a CLOSED-class token follows;
-# anything open-class (that is, a verb) reads as the modal. Conjunctions
-# and adverbs are deliberately absent: "may or might", "may well be".
-_MONTH_FOLLOWERS = (
-    "the|a|an|this|that|these|those|his|her|its|their|our|your|per|as|at|"
-    "with|without|under|over|between|of|in|on|by|for|to|from"
+# After a preposition, "may" is the MONTH unless a modal continuation
+# follows ("due by May" vs "the defect complained of may invalidate").
+#
+# Round 20 inverted this into a closed-class follower test on the theory
+# that enumerating open-class verbs could never converge. MEASURED, that
+# inversion was strictly worse: on a 110-sentence corpus of natural
+# drafter prose it introduced 58 month LEAKS (every "continued to May
+# pending service" shape, where the month is followed by an ordinary
+# noun) to buy back 8 modal false positives. The negative test is
+# restored with round 20's counterexamples folded in. The residual is a
+# known and accepted one: a modal followed by a verb outside this list
+# rejects, which costs a retry on a red path and never leaks a date.
+_MODAL_CONTINUATIONS = (
+    "be|have|has|had|not|no|never|also|still|already|require|requires|need|"
+    "needs|reflect|reflects|indicate|indicates|differ|differs|apply|applies|"
+    "exist|exists|remain|remains|suggest|suggests|show|shows|warrant|"
+    "warrants|prove|proves|affect|affects|change|changes|move|moves|turn|"
+    "turns|depend|depends|vary|varies|mean|means|matter|matters|"
+    "invalidate|invalidates|amount|amounts|constitute|constitutes|lack|"
+    "lacks|arise|arises|occur|occurs|happen|happens|follow|follows|come|"
+    "become|becomes|present|presents|involve|involves|extend|extends|"
+    "delay|delays|explain|explains|render|renders|entitle|entitles|"
+    "justify|justifies|support|supports|undermine|undermines|excuse|"
+    "excuses|void|voids|hinge|hinges|bear|bears|well|or|even|yet|thus|"
+    "therefore|instead|in|fact|simply|only|merely|"
+    # Round 20's own counterexamples.
+    "reside|resides|include|includes|consist|consists|list|lists|"
+    "contain|contains|cover|covers|reach|reaches|point|points|refer|refers"
 )
 _MAY_MONTH_NOUNS = (
     "hearing|hearings|deadline|deadlines|docket|dockets|calendar|"
@@ -469,11 +486,10 @@ _MAY_MONTH_NOUNS = (
     "status|filing|filings"
 )
 _MAY_DATE_CONTEXT = re.compile(
-    # Preposition/qualifier + may + (sentence boundary | closed-class word).
+    # Preposition/qualifier + may, NOT followed by a modal continuation.
     r"\b(?:in|by|since|until|before|after|during|of|from|for|to|into|through"
-    r"|till|until|toward|towards|on|next|last|early|late|mid)"
-    r"[\s-]+may\b"
-    rf"(?=\s*(?:[.,;:!?)\]]|$)|\s+(?:{_MONTH_FOLLOWERS})\b)"
+    r"|till|toward|towards|on|next|last|early|late|mid)"
+    rf"[\s-]+may\b(?!\s+(?:{_MODAL_CONTINUATIONS})\b)"
     # Attributive month, any determiner, singular or plural noun: "the May
     # hearings", "a May continuance", "their May setting".
     # Possessive nouns are determiners too ("the tenant's May hearing").
