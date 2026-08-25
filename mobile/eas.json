@@ -26,6 +26,14 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "ascAppId": "6805242554",
+        "appName": "Instanter",
+        "language": "en-US",
+        "sku": "instanter-ios",
+        "companyName": "Stephen Sookra"
+      }
+    }
   }
 }
