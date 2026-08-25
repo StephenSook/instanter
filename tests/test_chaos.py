@@ -2215,3 +2215,162 @@ def test_s_for_five_docket_twin_is_contested(tmp_path: Path) -> None:
     result = store.load_intake()
     assert result.records == ()
     assert any("more than once" in m.reason for m in result.malformed)
+
+
+# --- Round-20 reproducers -----------------------------------------------------
+
+
+def test_recorded_approval_is_immutable_for_the_run(tmp_path: Path) -> None:
+    """Round-20 reproducer: a writer retrying a partially failed commit
+    drew the runner's synthetic single-use deferral, which overwrote
+    attorney_action from 'approved' to 'deferred'. The approved-recovery
+    branch keyed on that scalar then never ran, so a case the attorney had
+    approved sat undelivered behind a red run the runner could have
+    healed. A recorded human decision is immutable for the run."""
+    from agent.hooks import AttorneyApprovalHook
+
+    ctx = make_ctx(tmp_path, [good_record("A-1", service_date="2026-08-30")], capacity=1)
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    decision = ctx.interrupt_candidates[0]
+    tools["submit_escalation_rationale"](
+        case_id="A-1",
+        disposition=decision.level.value,
+        explanation="",
+        confidence=0.9,
+    )
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, ("A-1",))
+
+    class FakeEvent:
+        def __init__(self) -> None:
+            self.tool_use = {"name": "commit_escalations"}
+            self.cancel_tool: str | None = None
+
+        def interrupt(self, name: str, reason: object) -> str:
+            return (
+                "defer: the single-use attorney response was already "
+                "consumed this run; a fresh approval is required"
+            )
+
+    event = FakeEvent()
+    AttorneyApprovalHook(ctx)._approve(event)  # type: ignore[arg-type]
+
+    assert ctx.attorney_action == "approved"  # the human's decision stands
+    assert event.cancel_tool is not None
+    assert "ALREADY RECORDED" in event.cancel_tool
+    kinds = audit_kinds(ctx)
+    assert kinds.count("commit_refused") == 1
+
+
+def test_approved_recovery_survives_a_later_action_write(tmp_path: Path) -> None:
+    """The recovery branch keys on the bound approval (the immutable
+    obligation), not the mutable action scalar."""
+    from agent.runner import run_live
+
+    class FailOnceStore(JsonFileCaseStore):
+        def __init__(self, intake_path: Path, escalations_path: Path) -> None:
+            super().__init__(intake_path, escalations_path)
+            self.writes = 0
+
+        def record_escalation(self, escalation: EscalationRecord) -> None:
+            self.writes += 1
+            if self.writes == 2:
+                raise OSError("transient disk error")
+            super().record_escalation(escalation)
+
+    store = FailOnceStore(
+        intake_path=SEED,
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    ctx = RunContext(
+        run_date=RUN_DATE,
+        attorney_capacity=2,
+        store=store,
+        audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+    )
+
+    import agent.graph as graph_module
+
+    def fake_graph(inner_ctx: RunContext, plugins: object = None) -> object:
+        def run(_payload: object) -> object:
+            from strands.multiagent import Status
+
+            inner_tools = build_tools(inner_ctx)
+            inner_tools["get_ranked_queue"]()
+            for d in inner_ctx.interrupt_candidates:
+                inner_tools["submit_escalation_rationale"](
+                    case_id=d.case_id,
+                    disposition=d.level.value,
+                    explanation="",
+                    confidence=0.9,
+                )
+            inner_ctx.attorney_action = "approved"
+            bind_approval(inner_ctx, tuple(d.case_id for d in inner_ctx.interrupt_candidates))
+            inner_tools["commit_escalations"]()  # partial: second write fails
+            inner_ctx.attorney_action = "deferred"  # the synthetic retry answer
+
+            class R:
+                def __init__(self) -> None:
+                    self.status = Status.COMPLETED
+                    self.interrupts: list[object] = []
+
+            return R()
+
+        return run
+
+    import pytest as _pytest
+
+    monkeypatch = _pytest.MonkeyPatch()
+    monkeypatch.setattr(graph_module, "build_triage_graph", fake_graph)
+    try:
+        report = run_live(ctx, attorney_response="approve")
+    finally:
+        monkeypatch.undo()
+
+    assert len(report.committed) == 2  # recovery delivered the approved set
+    assert report.failures == ()
+    assert report.missing_memos == ()
+    assert not report.succeeded  # the model-layer degradation still reads red
+
+
+def test_g_for_six_docket_twin_is_contested(tmp_path: Path) -> None:
+    """Round-20 reproducer: '26ED0010G' beside '26ED00106' took a capacity
+    slot and displaced a distinct urgent case under a green run."""
+    intake = _write_intake(
+        tmp_path,
+        [
+            {
+                "case_id": "26ED00106",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+            {
+                "case_id": "26ED0010G",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+        ],
+    )
+    store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
+    result = store.load_intake()
+    assert result.records == ()
+    assert any("more than once" in m.reason for m in result.malformed)
+
+
+def test_audit_sink_detects_whole_file_replacement(tmp_path: Path) -> None:
+    """Round-20 reproducer: rotation or truncation mid-run silently split
+    the trail into two independently valid files, so an auditor reading the
+    current file saw a complete-looking, incomplete record."""
+    from agent.audit import AuditEvent
+
+    path = tmp_path / "audit.jsonl"
+    sink = JsonlAuditSink(path)
+    for kind in ("run_started", "queue_ranked", "escalation_committed"):
+        sink.append(AuditEvent(kind=kind, case_id=None, payload={}, run_id="r"))
+    path.rename(tmp_path / "audit.jsonl.1")  # logrotate
+
+    with pytest.raises(ValueError, match="rotated, truncated, or replaced"):
+        sink.append(AuditEvent(kind="run_finished", case_id=None, payload={}, run_id="r"))

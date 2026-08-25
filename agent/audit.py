@@ -37,6 +37,13 @@ class JsonlAuditSink:
 
     def __init__(self, path: Path) -> None:
         self._path = path
+        # Highest sequence this sink has durably written. Intra-file damage
+        # is caught by validating the lines; WHOLE-FILE replacement
+        # (logrotate's rename-and-recreate, a copy-truncate) is invisible
+        # that way, because the fresh file is internally valid and simply
+        # restarts at 1. Anchoring to what this sink already wrote makes a
+        # replaced trail loud instead of silently split in two.
+        self._written_seq = 0
 
     def append(self, event: AuditEvent) -> None:
         # Sequence allocation and the append happen under one interprocess
@@ -75,6 +82,14 @@ class JsonlAuditSink:
                             "damaged audit trail."
                         )
                     seq = recorded_seq
+                if seq < self._written_seq:
+                    raise ValueError(
+                        f"audit file {self._path} lost records this sink "
+                        f"already wrote (highest seq on disk {seq}, this "
+                        f"sink wrote {self._written_seq}): the trail was "
+                        "rotated, truncated, or replaced mid-run. Refusing "
+                        "to append; staff must reconcile the audit trail."
+                    )
                 seq += 1
                 row = {
                     "seq": seq,
@@ -88,6 +103,7 @@ class JsonlAuditSink:
                 handle.write(json.dumps(row, default=str) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
+                self._written_seq = seq
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
