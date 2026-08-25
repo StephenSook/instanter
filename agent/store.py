@@ -10,6 +10,7 @@ not the first.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 from dataclasses import asdict, dataclass
@@ -102,7 +103,11 @@ class EscalationRecord:
 class CaseStore(Protocol):
     def load_intake(self) -> list[IntakeRecord]: ...
 
-    def record_escalation(self, escalation: EscalationRecord) -> None: ...
+    def record_escalation(self, escalation: EscalationRecord) -> None:
+        """MUST be an atomic insert-if-absent keyed on (run_id, case_id):
+        recording an already-recorded escalation is an idempotent no-op,
+        and concurrent writers can never produce two rows for one case."""
+        ...
 
     def list_escalations(self, run_id: str | None = None) -> list[EscalationRecord]: ...
 
@@ -127,16 +132,35 @@ class JsonFileCaseStore:
         return records
 
     def record_escalation(self, escalation: EscalationRecord) -> None:
+        """Atomic insert-if-absent on (run_id, case_id): the check and the
+        append happen under one interprocess lock, so concurrent retries for
+        the same run can never produce two rows for one case. A record that
+        already exists is an idempotent no-op. Flush + fsync inside the
+        lock: the row either exists durably or this raises into
+        commit_escalations' loud partial-failure handler. (The Phase C
+        DynamoDB store makes this a conditional write; this is the
+        local-mode equivalent.)"""
         payload = asdict(escalation)
         payload["recorded_at"] = datetime.now().astimezone().isoformat()
-        # Flush + fsync: an escalation either exists durably or this raises
-        # into commit_escalations' loud partial-failure handler. (The Phase C
-        # DynamoDB store makes durability and idempotency storage properties
-        # via conditional writes; this is the local-mode equivalent.)
-        with self._escalations_path.open("a") as handle:
-            handle.write(json.dumps(payload) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
+        with self._escalations_path.open("a+") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                handle.seek(0)
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    existing = json.loads(line)
+                    if (
+                        existing.get("run_id") == escalation.run_id
+                        and existing.get("case_id") == escalation.case_id
+                    ):
+                        return  # already durably recorded: idempotent no-op
+                handle.seek(0, os.SEEK_END)
+                handle.write(json.dumps(payload) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def list_escalations(self, run_id: str | None = None) -> list[EscalationRecord]:
         if not self._escalations_path.exists():

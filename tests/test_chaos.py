@@ -623,6 +623,39 @@ def test_post_approval_failure_recovers_through_the_floor(
     assert sorted(e.case_id for e in stored) == sorted(report.committed)
 
 
+def test_concurrent_same_run_writers_never_duplicate_an_escalation(tmp_path: Path) -> None:
+    """The round-3 reproducer: two retry workers for the same run both
+    observe a missing case and both write. Insert-if-absent under the
+    store's lock must leave exactly one row."""
+    import threading
+
+    store = JsonFileCaseStore(
+        intake_path=tmp_path / "unused.json",
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    record = EscalationRecord(
+        case_id="A-1",
+        disposition="interrupt",
+        rank=1,
+        factors=("overdue",),
+        rationale="Deadline passed.",
+        confidence=1.0,
+        run_id="r1",
+    )
+    barrier = threading.Barrier(2)
+
+    def write() -> None:
+        barrier.wait()
+        store.record_escalation(record)
+
+    threads = [threading.Thread(target=write) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(store.list_escalations(run_id="r1")) == 1
+
+
 def test_overlapping_audit_sinks_never_share_a_sequence(tmp_path: Path) -> None:
     from agent.audit import AuditEvent
 
