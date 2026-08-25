@@ -1370,7 +1370,7 @@ def test_no_clock_interrupt_memo_states_missing_deadline(tmp_path: Path) -> None
     tools["submit_escalation_rationale"](
         case_id="NC-1",
         disposition=decision.level.value,
-        explanation="No reliable deadline exists; staff must resolve the intake facts today.",
+        explanation=("No reliable deadline exists; staff must resolve the intake facts."),
         confidence=0.9,
     )
     ctx.attorney_action = "approved"
@@ -1873,3 +1873,93 @@ def test_identity_refusals_are_audited(tmp_path: Path) -> None:
     tools["write_packet_memo"](case_id="GHOST-3", notes="")
     kinds = audit_kinds(ctx)
     assert kinds.count("tool_refused") == 3
+
+
+# --- Round-16 reproducers -----------------------------------------------------
+
+
+def test_homoglyph_twin_case_id_is_refused(tmp_path: Path) -> None:
+    """Round-16 reproducer: '26ED00101' with a Cyrillic capital Ie in
+    place of the E swept beside the real docket, committed durably under
+    a green run, and could displace a genuinely distinct urgent case from
+    a capacity slot. Non-ASCII case ids now fail closed at intake."""
+    ctx = make_ctx(
+        tmp_path,
+        [
+            good_record("26ED00101", service_date="2026-08-30"),
+            IntakeRecord(
+                case_id="26ЕD00101",  # noqa: RUF001 (Cyrillic capital Ie)
+                jurisdiction_id="GA-FULTON",
+                service_date="2026-08-30",
+                service_method="personal",
+            ),
+        ],
+    )
+    tools = build_tools(ctx)
+    payload = json.loads(tools["get_ranked_queue"]())
+    assert {row["case_id"] for row in payload["queue"]} == {"26ED00101"}
+    assert len(payload["refused_cases"]) == 1
+    assert "ASCII" in payload["refused_cases"][0]["reason"]
+
+
+def test_case_variant_sibling_contests_identity(tmp_path: Path) -> None:
+    """Round-16 residual of the round-15 fix: a padded or case-variant
+    malformed sibling ('26ED00101 ') previously left the stale row
+    sweeping and committing alone. Identity keys are normalized."""
+    intake = _write_intake(
+        tmp_path,
+        [
+            {
+                "case_id": "26ED00101",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+            {
+                "case_id": "26ed00101",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-09-02",
+                "service_method": "personal",
+                "unexpected_field": True,
+            },
+        ],
+    )
+    store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
+    result = store.load_intake()
+    assert result.records == ()  # the stale row never sweeps alone
+    assert any("more than once" in m.reason for m in result.malformed)
+
+
+def test_capacity_zero_is_refused_at_run_construction(tmp_path: Path) -> None:
+    """Round-16 reproducer: --capacity 0 held the entire urgent sweep and
+    exited 0 green (a misconfigured scheduler's perpetual no-op)."""
+    store = JsonFileCaseStore(
+        intake_path=tmp_path / "unused.json",
+        escalations_path=tmp_path / "e.jsonl",
+    )
+    with pytest.raises(ValueError, match="attorney_capacity"):
+        RunContext(
+            run_date=RUN_DATE,
+            attorney_capacity=0,
+            store=store,
+            audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+        )
+
+
+def test_cli_rejects_empty_run_date_and_zero_capacity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Round-16 reproducer: --run-date "" (an unset shell variable) fell
+    through to TODAY, silently swapping the deadline engine's clock
+    anchor; --capacity 0 ran a green no-op."""
+    from agent import runner
+
+    for argv in (
+        ["runner", "--mode", "deterministic", "--seed", str(SEED), "--run-date", ""],
+        ["runner", "--mode", "deterministic", "--seed", str(SEED), "--capacity", "0"],
+    ):
+        monkeypatch.setattr("sys.argv", argv)
+        with pytest.raises(SystemExit) as excinfo:
+            runner.main()
+        assert excinfo.value.code == 2  # argparse error, loud
+        capsys.readouterr()

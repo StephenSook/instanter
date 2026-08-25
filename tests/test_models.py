@@ -303,3 +303,30 @@ def test_numeric_floor_rejects_nonascii_numerals_and_compounds() -> None:
             reject_model_numerics(poisoned, "notes")
     # 'tenant' must never trip the compound segmentation (ten + ant).
     assert reject_model_numerics("The tenant reports the notice arrived.", "notes")
+
+
+def test_numeric_floor_rejects_quantity_and_relative_date_words() -> None:
+    """Round-16 reproducers: collective quantities and relative or named
+    dates fabricate figures exactly as digits do."""
+    from agent.models import reject_model_numerics
+
+    for poisoned in (
+        "the tenant has a dozen days to respond",
+        "the hearing is a fortnight away",
+        "the deadline is tomorrow",
+        "half the window has elapsed",
+        "answer due by May third" if False else "due by May",
+    ):
+        with pytest.raises(ValueError):
+            reject_model_numerics(poisoned, "notes")
+
+
+def test_modal_may_is_legitimate_hedge_language() -> None:
+    """Round-16: rejecting lowercase modal 'may' starved the models of
+    their most natural hedge; only the capitalized month form rejects."""
+    from agent.models import reject_model_numerics
+
+    assert reject_model_numerics("the tenant may have moved", "notes")
+    assert reject_model_numerics("service may be defective", "notes")
+    with pytest.raises(ValueError):
+        reject_model_numerics("The answer is due by May.", "notes")

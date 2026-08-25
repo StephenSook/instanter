@@ -380,7 +380,10 @@ _NUMBER_WORDS = frozenset(
         "february",
         "march",
         "april",
-        "may",
+        # NOTE: modal "may" is handled case-sensitively in
+        # reject_model_numerics, not here: rejecting every lowercase "may"
+        # starved the models of their most natural hedge ("service may be
+        # defective") and every starvation ends in a backstopped red run.
         "june",
         "july",
         "august",
@@ -402,8 +405,31 @@ _NUMBER_WORDS = frozenset(
         "oct",
         "nov",
         "dec",
+        # Collective quantities and relative or named dates fabricate
+        # figures exactly as "nine" does ("a dozen days", "the deadline is
+        # tomorrow"). Dictionary-checked against legal vocabulary: no
+        # whole-token collisions.
+        "dozen",
+        "score",
+        "fortnight",
+        "couple",
+        "half",
+        "quarter",
+        "twice",
+        "thrice",
+        "noon",
+        "midnight",
+        "today",
+        "tomorrow",
+        "yesterday",
+        "eve",
     ]
 )
+# Month "May" is distinguishable from modal "may" only by case, and the
+# modal is the models' most natural hedge word. The month reads
+# capitalized in date-fabricating positions ("due by May third"); the raw
+# (pre-casefold) text is checked for exactly that form.
+_CAPITALIZED_MAY = re.compile(r"\bMay\b")
 _WORD_TOKEN = re.compile(r"[a-z]+")
 
 
@@ -447,6 +473,12 @@ def reject_model_numerics(text: str, field_name: str) -> str:
             f"{field_name} must contain no digits or numeric characters; "
             "every date, day count, and rank is rendered by the system. "
             "State the fact without the figure and resubmit."
+        )
+    if _CAPITALIZED_MAY.search(text):
+        raise ValueError(
+            f"{field_name} contains the month name 'May'; quantities and "
+            "dates come only from the system's fact sheet. Use 'might' for "
+            "possibility, and state dates as facts without naming them."
         )
     demarked = _strip_marks(normalized)
     canonical = _collapse_spaced_letters(_collapse_separated_letters(demarked))

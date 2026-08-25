@@ -550,9 +550,22 @@ def main() -> None:
     if args.attorney_response is None:
         args.attorney_response = "approve"
 
+    if args.capacity < 1:
+        parser.error(f"--capacity must be >= 1, got {args.capacity}")
+
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    run_date = date.fromisoformat(args.run_date) if args.run_date else date.today()
+    # None means the flag was omitted (default to today). An explicitly
+    # passed value must parse or fail LOUDLY: --run-date "" (an unset shell
+    # variable) previously fell through to today, silently swapping the
+    # deadline engine's clock anchor.
+    if args.run_date is None:
+        run_date = date.today()
+    else:
+        try:
+            run_date = date.fromisoformat(args.run_date)
+        except ValueError:
+            parser.error(f"--run-date {args.run_date!r} is not an ISO date")
 
     store = JsonFileCaseStore(
         intake_path=Path(args.seed),
