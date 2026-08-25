@@ -38,7 +38,16 @@ class RunContext:
     rationales: dict[str, EscalationRationale] = field(default_factory=dict)
     packet_memos: dict[str, str] = field(default_factory=dict)
     committed_case_ids: tuple[str, ...] = ()
-    attorney_action: str = ""  # "approved" | "deferred" | "" before review
+    # "approved": a human answered a presented interrupt with an exact
+    # approval. "deferred": a human deferred (or the response failed the
+    # strict parse). "pending": the unattended floor committed escalations
+    # for LATER attorney review because no human was presented anything
+    # (approval is never claimed for a commit nobody saw). "": no decision.
+    attorney_action: str = ""
+    # Set by the RUNNER only, around a floor/pending commit: the commit
+    # tool's fail-closed gate accepts either a bound human approval or this
+    # explicit floor authority, never a bare unapproved call.
+    floor_commit_authorized: bool = False
     # Immutable snapshot of exactly what the attorney approved: the case ids
     # presented at the interrupt. Approval binds to THESE cases; nothing
     # outside the snapshot may ever be committed under that approval, and a

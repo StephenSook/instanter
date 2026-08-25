@@ -141,11 +141,9 @@ def _ensure_packet_memos(ctx: RunContext, tools: dict[str, Any]) -> None:
         tools["write_packet_memo"](case_id=case_id, memo=" ".join(parts)[:1500])
 
 
-def _deterministic_floor(ctx: RunContext, tools: dict[str, Any], attorney_response: str) -> None:
-    """The part of the sweep that must NEVER depend on model discretion:
-    compute every deadline, rank the queue, put every interrupt-now case in
-    front of the attorney (template rationale if the model never wrote one),
-    execute the attorney's decision, and complete the attorney packet."""
+def _rank_and_template(ctx: RunContext, tools: dict[str, Any]) -> None:
+    """Deterministic prelude shared by every floor path: rank if needed,
+    template any missing rationale."""
     if not ctx.decisions:
         tools["get_ranked_queue"]()
     for decision in ctx.interrupt_candidates:
@@ -160,9 +158,47 @@ def _deterministic_floor(ctx: RunContext, tools: dict[str, Any], attorney_respon
                 run_id=ctx.run_id,
             )
         )
+
+
+def _deterministic_floor(ctx: RunContext, tools: dict[str, Any], attorney_response: str) -> None:
+    """The presented-response floor (run_deterministic: the invoking human's
+    realtime response IS the decision): rank, template missing rationales,
+    execute the decision, complete the attorney packet."""
+    _rank_and_template(ctx, tools)
     if ctx.interrupt_candidates:
         _apply_attorney_decision(ctx, tools, attorney_response)
         _ensure_packet_memos(ctx, tools)
+
+
+def _pending_commit(ctx: RunContext, tools: dict[str, Any]) -> None:
+    """The unattended floor: nobody was presented anything, so no approval
+    is claimed. Interrupt-now cases are committed as PENDING attorney
+    review under the runner's explicit floor authority, packet completed
+    with template memos, everything audited."""
+    _rank_and_template(ctx, tools)
+    if not ctx.interrupt_candidates:
+        return
+    ctx.attorney_action = "pending"
+    ctx.floor_commit_authorized = True
+    try:
+        ctx.audit.append(
+            AuditEvent(
+                kind="pending_review_commit",
+                case_id=None,
+                payload={
+                    "cases": [d.case_id for d in ctx.interrupt_candidates],
+                    "reason": (
+                        "committed for attorney review without a realtime "
+                        "approval; no human was presented this queue"
+                    ),
+                },
+                run_id=ctx.run_id,
+            )
+        )
+        tools["commit_escalations"]()
+        _ensure_packet_memos(ctx, tools)
+    finally:
+        ctx.floor_commit_authorized = False
 
 
 def run_deterministic(ctx: RunContext, attorney_response: str = "approve") -> RunReport:
@@ -206,16 +242,31 @@ def run_live(
             "Run the unattended triage sweep for this intake queue: analyze "
             "notes, rank deterministically, escalate through attorney approval."
         )
+        # The supplied response is ONE human decision: it answers exactly
+        # one interrupt. Any further interrupt in the same run (a retry
+        # after a digest mismatch, a second commit attempt) gets a fail-
+        # closed deferral instead of a replayed approval the human never
+        # gave for that content.
+        response_consumed = False
         while result.status == Status.INTERRUPTED:
-            responses: list[InterruptResponseContent] = [
-                {
-                    "interruptResponse": {
-                        "interruptId": interrupt.id,
-                        "response": attorney_response,
+            responses: list[InterruptResponseContent] = []
+            for interrupt in result.interrupts:
+                if response_consumed:
+                    answer = (
+                        "defer: the single-use attorney response was already "
+                        "consumed this run; a fresh approval is required"
+                    )
+                else:
+                    answer = attorney_response
+                    response_consumed = True
+                responses.append(
+                    {
+                        "interruptResponse": {
+                            "interruptId": interrupt.id,
+                            "response": answer,
+                        }
                     }
-                }
-                for interrupt in result.interrupts
-            ]
+                )
             result = graph(responses)
         graph_status = str(result.status)
     except Exception as exc:
@@ -234,7 +285,10 @@ def run_live(
     # run without ever reaching the attorney (a node dies, the writer
     # declines to act on degraded context, or the graph raises). Undertriage
     # is the catastrophic error, so if no attorney decision was recorded,
-    # the runner itself completes the sweep deterministically, audited.
+    # the runner itself completes the sweep and commits the interrupt-now
+    # cases as PENDING attorney review. No approval is claimed: the launch
+    # response answered a presented interrupt or nothing; a commit nobody
+    # saw is pending, and the console review is where it gets its human.
     backstop_used = False
     tools: dict[str, Any] | None = None
     if not ctx.attorney_action:
@@ -250,13 +304,13 @@ def run_live(
                         "had_ranked_queue": bool(ctx.decisions),
                         "reason": (
                             "model layer ended the run without an attorney "
-                            "decision; completing the sweep deterministically"
+                            "decision; committing the sweep as pending review"
                         ),
                     },
                     run_id=ctx.run_id,
                 )
             )
-            _deterministic_floor(ctx, tools, attorney_response)
+            _pending_commit(ctx, tools)
     elif ctx.attorney_action == "approved":
         # Approval is a decision, not a completed commit: an exception after
         # the hook approved but before the writes finished leaves approved
@@ -307,7 +361,7 @@ def run_live(
 
     # Attorney-packet completeness: every committed case carries a memo,
     # whichever path committed it (drafter, floor, or recovery).
-    if ctx.attorney_action == "approved" and ctx.committed_case_ids:
+    if ctx.attorney_action in ("approved", "pending") and ctx.committed_case_ids:
         if tools is None:
             tools = build_tools(ctx)
         _ensure_packet_memos(ctx, tools)
@@ -345,23 +399,25 @@ def _template_rationale(decision: TriageDecision) -> EscalationRationale:
 def _report(
     ctx: RunContext, mode: str, backstop_used: bool = False, model_error: str = ""
 ) -> RunReport:
-    # Parity check: an approved decision whose commit did not durably land
-    # for every APPROVED case is a FAILED run, whatever else happened. The
-    # approval snapshot is the reference (never the current queue, which
-    # recovery may have recomputed); an approval bound to no snapshot is
-    # itself a failure.
+    # Parity check: once a commit was owed (approved or pending), EVERY
+    # case that needed delivery must be durably committed: the approval
+    # snapshot AND every current interrupt-now candidate. A case minted
+    # after the approval that could not ride it is still an undelivered
+    # urgent case; it fails the run until a fresh approval resolves it.
     failures: tuple[str, ...] = ()
-    if ctx.attorney_action == "approved":
-        if ctx.approved_case_ids is None:
-            failures = ("approval-not-bound-to-candidates",)
-        else:
-            failures = tuple(
-                case_id
-                for case_id in ctx.approved_case_ids
-                if case_id not in ctx.committed_case_ids
-            )
+    if ctx.attorney_action in ("approved", "pending"):
+        owed: list[str] = []
+        if ctx.attorney_action == "approved" and ctx.approved_case_ids is None:
+            owed.append("approval-not-bound-to-candidates")
+        for case_id in ctx.approved_case_ids or ():
+            if case_id not in ctx.committed_case_ids and case_id not in owed:
+                owed.append(case_id)
+        for decision in ctx.interrupt_candidates:
+            if decision.case_id not in ctx.committed_case_ids and decision.case_id not in owed:
+                owed.append(decision.case_id)
+        failures = tuple(owed)
     missing_memos: tuple[str, ...] = ()
-    if ctx.attorney_action == "approved":
+    if ctx.attorney_action in ("approved", "pending"):
         missing_memos = tuple(
             case_id for case_id in ctx.committed_case_ids if case_id not in ctx.packet_memos
         )

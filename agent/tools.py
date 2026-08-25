@@ -320,51 +320,58 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         action pauses for a licensed attorney's approval before executing;
         the attorney may approve or defer the whole set.
         """
-        # Fail closed BEFORE anything touches the store: writes require an
-        # attorney approval bound to a nonempty snapshot with a verifiable
-        # content digest. This holds even if the approval hook were unwired
-        # (a green unit suite beside dead runtime wiring must still not be
-        # able to commit).
-        if ctx.attorney_action != "approved":
-            ctx.audit.append(
-                AuditEvent(
-                    kind="commit_refused",
-                    case_id=None,
-                    payload={"reason": "not_approved", "attorney_action": ctx.attorney_action},
-                    run_id=ctx.run_id,
+        # Fail closed BEFORE anything touches the store. Two authorities can
+        # commit, nothing else: (a) a human approval bound to a nonempty
+        # snapshot with a verifiable content digest, or (b) the runner's
+        # unattended floor, which writes pending-review records under an
+        # explicit authorization flag and NEVER claims approval. This holds
+        # even if the approval hook were unwired (a green unit suite beside
+        # dead runtime wiring must still not be able to commit).
+        pending_floor = ctx.attorney_action == "pending" and ctx.floor_commit_authorized
+        if not pending_floor:
+            if ctx.attorney_action != "approved":
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="commit_refused",
+                        case_id=None,
+                        payload={
+                            "reason": "not_approved",
+                            "attorney_action": ctx.attorney_action,
+                        },
+                        run_id=ctx.run_id,
+                    )
                 )
-            )
-            return (
-                "NOT APPROVED: committing escalations requires an attorney "
-                "approval; none is recorded for this run."
-            )
-        if not ctx.approved_case_ids or ctx.approval_digest is None:
-            ctx.audit.append(
-                AuditEvent(
-                    kind="commit_refused",
-                    case_id=None,
-                    payload={"reason": "approval_unbound"},
-                    run_id=ctx.run_id,
+                return (
+                    "NOT APPROVED: committing escalations requires an attorney "
+                    "approval; none is recorded for this run."
                 )
-            )
-            return (
-                "APPROVAL UNBOUND: the recorded approval carries no candidate "
-                "snapshot or content digest; a fresh attorney approval is "
-                "required before anything can be committed."
-            )
-        if presented_content_digest(ctx, ctx.approved_case_ids) != ctx.approval_digest:
-            ctx.audit.append(
-                AuditEvent(
-                    kind="commit_refused",
-                    case_id=None,
-                    payload={"reason": "approved_content_changed"},
-                    run_id=ctx.run_id,
+            if not ctx.approved_case_ids or ctx.approval_digest is None:
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="commit_refused",
+                        case_id=None,
+                        payload={"reason": "approval_unbound"},
+                        run_id=ctx.run_id,
+                    )
                 )
-            )
-            return (
-                "APPROVED CONTENT CHANGED: the queue or a rationale differs "
-                "from what the attorney approved; a fresh approval is required."
-            )
+                return (
+                    "APPROVAL UNBOUND: the recorded approval carries no candidate "
+                    "snapshot or content digest; a fresh attorney approval is "
+                    "required before anything can be committed."
+                )
+            if presented_content_digest(ctx, ctx.approved_case_ids) != ctx.approval_digest:
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="commit_refused",
+                        case_id=None,
+                        payload={"reason": "approved_content_changed"},
+                        run_id=ctx.run_id,
+                    )
+                )
+                return (
+                    "APPROVED CONTENT CHANGED: the queue or a rationale differs "
+                    "from what the attorney approved; a fresh approval is required."
+                )
         missing = [d.case_id for d in ctx.interrupt_candidates if d.case_id not in ctx.rationales]
         if missing:
             ctx.audit.append(
@@ -378,16 +385,62 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
             return "MISSING RATIONALES: submit_escalation_rationale first for: " + ", ".join(
                 missing
             )
-        # Idempotent against DURABLE state, not in-memory state: an
-        # ambiguous store failure (the row landed, then fsync raised) leaves
-        # ctx.committed_case_ids behind reality, and trusting it would
-        # duplicate rows on retry. Reconcile from the store first; the store
-        # is the truth about what committed.
-        stored_ids = {e.case_id for e in ctx.store.list_escalations(run_id=ctx.run_id)}
-        durable = set(ctx.committed_case_ids) | stored_ids
-        already = [d.case_id for d in ctx.interrupt_candidates if d.case_id in durable]
+
+        # Idempotent against DURABLE state, verified by CONTENT: the store
+        # is the truth about what committed, and a durable row only counts
+        # as this run's commit if it says exactly what this run would write
+        # (a same-key row carrying a stale rank or a different rationale is
+        # a conflict a human must resolve, never a silent success).
+        def expected_record(decision: Any) -> EscalationRecord:
+            rationale = ctx.rationales[decision.case_id]
+            return EscalationRecord(
+                case_id=decision.case_id,
+                disposition=decision.level.value,
+                rank=decision.rank,
+                factors=decision.factors,
+                rationale=rationale.rationale,
+                confidence=rationale.confidence,
+                run_id=ctx.run_id,
+                status="pending_attorney",
+            )
+
+        def content_key(record: EscalationRecord) -> tuple[Any, ...]:
+            return (
+                record.disposition,
+                record.rank,
+                tuple(record.factors),
+                record.rationale,
+                record.confidence,
+            )
+
+        stored = {e.case_id: e for e in ctx.store.list_escalations(run_id=ctx.run_id)}
+        already: list[str] = []
+        conflicts: list[str] = []
+        to_write = []
+        for decision in ctx.interrupt_candidates:
+            durable_row = stored.get(decision.case_id)
+            if durable_row is None:
+                to_write.append(decision)
+            elif content_key(durable_row) == content_key(expected_record(decision)):
+                already.append(decision.case_id)
+            else:
+                conflicts.append(decision.case_id)
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="store_conflict",
+                        case_id=decision.case_id,
+                        payload={
+                            "reason": (
+                                "a durable row with this run's key carries "
+                                "different content; staff must reconcile"
+                            ),
+                            "stored_rank": durable_row.rank,
+                            "expected_rank": decision.rank,
+                        },
+                        run_id=ctx.run_id,
+                    )
+                )
         ctx.committed_case_ids = tuple(already)
-        to_write = [d for d in ctx.interrupt_candidates if d.case_id not in durable]
         # Approval binding: once an attorney has approved, ONLY the cases in
         # the approval snapshot may be committed under it. Anything the
         # queue has since minted needs a fresh interrupt, never a ride on an
@@ -406,6 +459,13 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 )
             to_write = [d for d in to_write if d.case_id in approved]
         if not to_write:
+            if conflicts:
+                return (
+                    f"STORE CONFLICT: durable rows for {', '.join(conflicts)} "
+                    "carry different content than this run would write; staff "
+                    "must reconcile the escalation store. Nothing further was "
+                    "committed."
+                )
             ctx.audit.append(
                 AuditEvent(
                     kind="commit_refused",
@@ -475,7 +535,10 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 run_id=ctx.run_id,
             )
         )
-        return f"Committed {len(newly)} escalation(s): {', '.join(newly)}."
+        note = (
+            f" STORE CONFLICT on {', '.join(conflicts)}: staff must reconcile." if conflicts else ""
+        )
+        return f"Committed {len(newly)} escalation(s): {', '.join(newly)}.{note}"
 
     @tool
     def write_packet_memo(case_id: str, memo: str) -> str:
