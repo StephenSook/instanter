@@ -4,9 +4,22 @@ A background triage agent for eviction-defense clinics. It watches a clinic's in
 
 > **Instanter provides legal information and deadline computation, not legal advice, and is operated under attorney supervision.** It drafts only and never files. It computes deadlines and never advises. A licensed attorney is the reviewer of every case it surfaces. All demo data is synthetic; the statutory rules are real and public (O.C.G.A. 44-7-51; 1-3-1(d)(3); 1-4-1). No organization is a partner in or endorser of this project.
 
+## See it running
+
+**<https://d2ew2t4uldglcr.cloudfront.net>** — no account, no key, no login.
+
+**<https://d2ew2t4uldglcr.cloudfront.net/api/stats>** recomputes every answer deadline in the corpus on each request and reports what it found. Nothing there is cached or stored, so the numbers below are measured while you read them:
+
+> **4 of 46 answer deadlines in the corpus are ones counting seven days by hand gets wrong.**
+> Three of them roll off a weekend under O.C.G.A. 1-3-1(d)(3). One is controlled by a summons stating a different date, which under O.C.G.A. 44-7-51(b) is the date that binds the tenant. A missed answer deadline in a dispossessory case is a default judgment, which is an eviction.
+
+The endpoint returns both lists in full, so the headline can be checked by counting rows. `infra/verify_door.sh` runs that check, and four others, from outside with no credentials.
+
 ## Status
 
 Under active build for the Agents for Humans Hackathon (submission window Aug 10 to Sep 14, 2026). This README grows with the code; nothing is claimed here before it ships.
+
+Shipped and reachable today: the deterministic deadline engine, the triage agent with its attorney-approval interrupt, the operator console, and the public door above. The door's `/api/run` endpoint returns an explicit 503 until the agent runtime is wired behind it, rather than pretending to start a run it cannot serve.
 
 ## Why
 
@@ -26,6 +39,9 @@ seed/      synthetic intake, labelled EXAMPLE DATA in every record
 tests/     statutory test corpus for the engine, plus the agent's chaos and contract suites
 docs/      architecture decision records
 scripts/   CI gates (AI-tone, secret scanning wrappers)
+infra/     the public judge door: CDK app, the door Lambda, and its outside-in verification
+spikes/    throwaway experiments kept for their findings, not their code
+web/       the operator console (React, Vite, Tailwind), deployed behind CloudFront
 ```
 
 Further directories (bff, infra, console, mobile) land as their phases ship.
