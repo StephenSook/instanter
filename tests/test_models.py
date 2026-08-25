@@ -120,6 +120,13 @@ ADVICE_PAYLOADS = [
     "Yоu should file an answer today",  # noqa: RUF001 (Cyrillic small o homoglyph)
     "Kindly pay the rent into the registry",
     "Тhe tenant should respond",  # noqa: RUF001 (Cyrillic capital Te homoglyph)
+    # Round-8 reproducers: format char, combining mark, leet, spaced letters,
+    # control char
+    "F\u200dile an answer today",  # zero-width joiner inside the verb
+    "Fi\u0301le an answer today",  # combining acute over the i
+    "F1le an answer today",  # digit-for-letter substitution
+    "F i l e an answer today",  # spaced-out letters
+    "The deadline\x00 passed with no answer.",  # raw control character
 ]
 
 

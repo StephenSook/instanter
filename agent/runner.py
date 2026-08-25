@@ -72,7 +72,22 @@ def _load_records(ctx: RunContext) -> None:
             "single-use. Construct a fresh context (and run_id) per invocation."
         )
     ctx.started = True
-    for record in ctx.store.load_intake():
+    loaded = ctx.store.load_intake()
+    # Malformed RAW rows (unconstructible: wrong shape, unknown fields) are
+    # case-level refusals exactly like unparseable field values: audited,
+    # surfaced in the report, failing the run, never aborting the sweep of
+    # the rows that did parse.
+    for malformed_row in loaded.malformed:
+        ctx.refused_cases[malformed_row.row_key] = malformed_row.reason
+        ctx.audit.append(
+            AuditEvent(
+                kind="case_refused",
+                case_id=malformed_row.row_key,
+                payload={"reason": malformed_row.reason},
+                run_id=ctx.run_id,
+            )
+        )
+    for record in loaded.records:
         ctx.records[record.case_id] = record
     ctx.audit.append(
         AuditEvent(
@@ -80,6 +95,7 @@ def _load_records(ctx: RunContext) -> None:
             case_id=None,
             payload={
                 "mode_records": len(ctx.records),
+                "malformed_rows": len(loaded.malformed),
                 "run_date": ctx.run_date.isoformat(),
                 "capacity": ctx.attorney_capacity,
             },

@@ -75,6 +75,10 @@ def _scenario(
         expected_output={
             "committed": expected_committed,
             "attorney_action": expected_action,
+            # Every scripted scenario must end as a SUCCEEDED RunReport:
+            # matching commits under a failed report (backstop save, model
+            # error, hidden refusals) is not a pass.
+            "succeeded": True,
         },
         expected_assertion=assertion,
         metadata={"seed": str(SEED.name), "run_date": RUN_DATE.isoformat()},
@@ -157,6 +161,21 @@ class ExpectedRunShape(Evaluator[dict[str, Any], dict[str, Any]]):
             )
         if not should_draft and drafted:
             failures.append("drafter ran on a deferred/empty run")
+        # RunReport honesty: expected commits landing is NOT success when
+        # the report itself says the run failed. Every outcome channel is
+        # asserted, so a backstop save, a hidden refusal, a lost commit, or
+        # a terminal model error can never hide behind matching commits.
+        if bool(actual.get("succeeded")) is not bool(expected.get("succeeded", True)):
+            failures.append(
+                f"succeeded {actual.get('succeeded')} != expected {expected.get('succeeded', True)}"
+            )
+        for channel in ("failures", "refused", "missing_memos"):
+            if actual.get(channel):
+                failures.append(f"{channel} nonempty: {actual.get(channel)}")
+        if actual.get("model_error"):
+            failures.append(f"model_error recorded: {actual.get('model_error')}")
+        if actual.get("backstop_used"):
+            failures.append("backstop_used: the model layer did not finish its own sweep")
         ok = not failures
         return [
             EvaluationOutput(
@@ -196,13 +215,22 @@ class ChaosDegradation(Evaluator[dict[str, Any], dict[str, Any]]):
                 f"deadlines_computed {actual.get('deadlines_computed')} < 48 "
                 "(the deterministic sweep did not cover the intake)"
             )
+        # Degradation may cost the model layer (a backstop save and a
+        # recorded model error are acceptable under injected chaos), but it
+        # may never cost a case: refusals, lost commits, and missing memos
+        # fail the chaos run exactly as they fail a normal one.
+        for channel in ("failures", "refused", "missing_memos"):
+            if actual.get(channel):
+                failures.append(f"{channel} nonempty under chaos: {actual.get(channel)}")
         ok = not failures
         return [
             EvaluationOutput(
                 score=1.0 if ok else 0.0,
                 test_pass=ok,
                 reason=(
-                    "degraded exactly: zero observations, full deterministic sweep"
+                    "degraded exactly: zero observations, full deterministic "
+                    f"sweep, no case lost (succeeded={actual.get('succeeded')}, "
+                    f"backstop_used={actual.get('backstop_used')})"
                     if ok
                     else "; ".join(failures)
                 ),
@@ -257,6 +285,13 @@ def _run_graph_case(
             "deadlines_computed": kinds.count("deadline_computed"),
             "rejections": kinds.count("observation_rejected") + kinds.count("rationale_rejected"),
             "backstop_used": report.backstop_used,
+            # The complete RunReport outcome: evaluators assert these, so a
+            # run the report marks failed can never score as a pass.
+            "succeeded": report.succeeded,
+            "failures": list(report.failures),
+            "refused": list(report.refused),
+            "missing_memos": list(report.missing_memos),
+            "model_error": report.model_error,
             "rationales": rationales,
         },
         "trajectory": trajectory,

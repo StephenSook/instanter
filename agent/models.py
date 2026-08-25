@@ -137,6 +137,67 @@ _IMPERATIVE_PREFIX_WORDS = frozenset(
 
 _EDGE_PUNCTUATION = re.compile(r"^[^0-9a-z]+|[^0-9a-z]+$")
 
+# Digit and symbol substitutions that spell a protected word past a literal
+# match ("F1le an answer"). Applied to a diacritic-stripped shadow copy for
+# matching only; the delivered text is unchanged.
+_LEET_FOLD = str.maketrans(
+    {
+        "0": "o",
+        "1": "i",
+        "3": "e",
+        "4": "a",
+        "5": "s",
+        "7": "t",
+        "8": "b",
+        "9": "g",
+        "@": "a",
+        "$": "s",
+    }
+)
+
+
+def _forbidden_character(text: str) -> str | None:
+    """Control (Cc) and format (Cf) characters have no place in factual
+    memo text and are exactly how invisible-character payloads smuggle a
+    protected word past matching (a zero-width joiner inside 'file') or
+    ambiguity into a hash input. Newline and tab stay legal."""
+    for ch in text:
+        if ch in ("\n", "\t"):
+            continue
+        if unicodedata.category(ch) in ("Cc", "Cf"):
+            return ch
+    return None
+
+
+def _strip_marks(text: str) -> str:
+    """Diacritic-stripped shadow for matching: NFD-decompose, drop the
+    nonspacing marks, so a combining acute cannot split 'file'."""
+    return "".join(
+        ch for ch in unicodedata.normalize("NFD", text) if unicodedata.category(ch) != "Mn"
+    )
+
+
+def _collapse_spaced_letters(text: str) -> str:
+    """Collapse runs of two-plus single-letter tokens ('F i l e') into one
+    word so spacing cannot hide an imperative. Matching shadow only."""
+    out: list[str] = []
+    run: list[str] = []
+    for token in text.split():
+        if len(token) == 1 and token.isalpha():
+            run.append(token)
+            continue
+        if len(run) >= 2:
+            out.append("".join(run))
+        else:
+            out.extend(run)
+        run = []
+        out.append(token)
+    if len(run) >= 2:
+        out.append("".join(run))
+    else:
+        out.extend(run)
+    return " ".join(out)
+
 
 def _mixed_script_token(text: str) -> str | None:
     """A token mixing Latin letters with another script is a lookalike
@@ -152,31 +213,24 @@ def _mixed_script_token(text: str) -> str | None:
     return None
 
 
-def _reject_advice_language(text: str, field_name: str) -> str:
-    normalized = unicodedata.normalize("NFKC", text).casefold().translate(_HOMOGLYPH_FOLD)
-    mixed = _mixed_script_token(normalized)
-    if mixed is not None:
-        raise ValueError(
-            f"{field_name} contains the mixed-script lookalike token "
-            f"{mixed!r}; this floor cannot read it reliably and fails closed"
-        )
+def _scan_variant(variant: str, field_name: str) -> None:
     for phrase in _ADVICE_PHRASES:
-        if phrase in normalized:
+        if phrase in variant:
             raise ValueError(
                 f"{field_name} contains advice language ({phrase!r}); this "
                 "system states facts for a licensed attorney and never advises"
             )
-    if _SECOND_PERSON_DIRECTIVE.search(normalized):
+    if _SECOND_PERSON_DIRECTIVE.search(variant):
         raise ValueError(
             f"{field_name} contains a second-person legal directive; this "
             "system states facts for a licensed attorney and never advises"
         )
-    if _DEFENSE_COUPLING.search(normalized):
+    if _DEFENSE_COUPLING.search(variant):
         raise ValueError(
             f"{field_name} couples a legal action to a defense; this system "
             "states facts for a licensed attorney and never advises"
         )
-    for sentence in _SENTENCE_SPLIT.split(normalized):
+    for sentence in _SENTENCE_SPLIT.split(variant):
         # The operative first word: strip bullet/bracket punctuation from
         # token edges (interior hyphens survive, so "pay-or-quit notice"
         # stays factual) and skip polite prefixes ("Please file...").
@@ -190,6 +244,34 @@ def _reject_advice_language(text: str, field_name: str) -> str:
                 f"{words[index]!r}; this system states facts for a licensed "
                 "attorney and never advises"
             )
+
+
+def _reject_advice_language(text: str, field_name: str) -> str:
+    forbidden = _forbidden_character(text)
+    if forbidden is not None:
+        raise ValueError(
+            f"{field_name} contains the control or format character "
+            f"U+{ord(forbidden):04X}; factual memo text has no use for "
+            "invisible characters and this floor fails closed on them"
+        )
+    normalized = unicodedata.normalize("NFKC", text).casefold().translate(_HOMOGLYPH_FOLD)
+    mixed = _mixed_script_token(normalized)
+    if mixed is not None:
+        raise ValueError(
+            f"{field_name} contains the mixed-script lookalike token "
+            f"{mixed!r}; this floor cannot read it reliably and fails closed"
+        )
+    # Every check runs over each matching shadow: the text as normalized,
+    # diacritic-stripped, leet-folded, and space-collapsed. A payload must
+    # evade all of them; delivered text is always the original.
+    demarked = _strip_marks(normalized)
+    for variant in {
+        normalized,
+        demarked,
+        demarked.translate(_LEET_FOLD),
+        _collapse_spaced_letters(demarked),
+    }:
+        _scan_variant(variant, field_name)
     return text
 
 
