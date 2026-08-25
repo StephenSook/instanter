@@ -220,6 +220,70 @@ def test_deterministic_run_surfaces_store_failure(tmp_path: Path) -> None:
     assert not report.succeeded
 
 
+def test_commit_retry_after_partial_failure_never_duplicates(tmp_path: Path) -> None:
+    """A retry after a partial store failure writes only the missing cases;
+    the already-durable escalation is never appended twice."""
+    store = FailingAfterOneStore(
+        intake_path=tmp_path / "unused.json",
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    ctx = RunContext(
+        run_date=RUN_DATE,
+        attorney_capacity=2,
+        store=store,
+        audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+    )
+    ctx.records["A-1"] = good_record("A-1", service_date="2026-08-30")
+    ctx.records["B-2"] = good_record("B-2", service_date="2026-08-31")
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    for decision in ctx.interrupt_candidates:
+        tools["submit_escalation_rationale"](
+            case_id=decision.case_id,
+            disposition=decision.level.value,
+            contributing_factors=list(decision.factors)[:8],
+            rationale="Deadline has passed with no answer on file.",
+            confidence=0.9,
+        )
+
+    first = tools["commit_escalations"]()
+    assert "STORE WRITE FAILED" in first
+    assert len(ctx.committed_case_ids) == 1
+
+    # The fault clears (FailingAfterOneStore only fails its second write;
+    # reset the counter to simulate recovery), and the model retries.
+    store.writes = 0
+    second = tools["commit_escalations"]()
+    assert "Committed 1 escalation(s)" in second
+    stored = store.list_escalations(run_id=ctx.run_id)
+    assert sorted(e.case_id for e in stored) == sorted(ctx.committed_case_ids)
+    assert len(stored) == 2  # exactly one row per case, no duplicates
+
+    third = tools["commit_escalations"]()
+    assert "ALREADY COMMITTED" in third
+    assert len(store.list_escalations(run_id=ctx.run_id)) == 2
+
+
+def seed_ctx(tmp_path: Path, capacity: int = 2) -> RunContext:
+    store = JsonFileCaseStore(
+        intake_path=SEED,
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    return RunContext(
+        run_date=RUN_DATE,
+        attorney_capacity=capacity,
+        store=store,
+        audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+    )
+
+
+def test_run_context_is_single_use(tmp_path: Path) -> None:
+    ctx = seed_ctx(tmp_path)
+    run_deterministic(ctx)
+    with pytest.raises(RuntimeError, match="single-use"):
+        run_deterministic(ctx)
+
+
 # --- The deterministic floor: undertriage must be impossible ------------------
 
 

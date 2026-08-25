@@ -288,8 +288,18 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
             return "MISSING RATIONALES: submit_escalation_rationale first for: " + ", ".join(
                 missing
             )
-        committed: list[str] = []
-        for decision in ctx.interrupt_candidates:
+        # Idempotent by construction: cases already durably written this run
+        # (a prior call, or a retry after partial failure) are never written
+        # twice. A second call with nothing left to write is refused.
+        already = list(ctx.committed_case_ids)
+        to_write = [d for d in ctx.interrupt_candidates if d.case_id not in already]
+        if not to_write:
+            return (
+                "ALREADY COMMITTED: every interrupt-now escalation is already "
+                "durably recorded this run; do not call commit_escalations again."
+            )
+        newly: list[str] = []
+        for decision in to_write:
             rationale = ctx.rationales[decision.case_id]
             try:
                 ctx.store.record_escalation(
@@ -308,18 +318,18 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 # A store failure mid-commit must never pass silently: audit
                 # exactly what was and was not written, surface it to the
                 # attorney path, and do not pretend the set committed.
-                ctx.committed_case_ids = tuple(committed)
+                ctx.committed_case_ids = tuple(already + newly)
                 ctx.audit.append(
                     AuditEvent(
                         kind="store_write_failed",
                         case_id=decision.case_id,
                         payload={
                             "error": str(exc)[:300],
-                            "written": committed,
+                            "written": already + newly,
                             "not_written": [
                                 d.case_id
                                 for d in ctx.interrupt_candidates
-                                if d.case_id not in committed
+                                if d.case_id not in ctx.committed_case_ids
                             ],
                         },
                         run_id=ctx.run_id,
@@ -327,21 +337,25 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 )
                 return (
                     f"STORE WRITE FAILED on {decision.case_id}: {exc}. "
-                    f"Written before failure: {', '.join(committed) or 'none'}. "
+                    f"Durably written so far: {', '.join(already + newly) or 'none'}. "
                     "The remaining escalations were NOT committed; staff must "
                     "review the escalation store before any retry."
                 )
-            committed.append(decision.case_id)
-        ctx.committed_case_ids = tuple(committed)
+            newly.append(decision.case_id)
+        ctx.committed_case_ids = tuple(already + newly)
         ctx.audit.append(
             AuditEvent(
                 kind="escalation_committed",
                 case_id=None,
-                payload={"cases": committed, "attorney_action": ctx.attorney_action},
+                payload={
+                    "cases": newly,
+                    "total_committed": already + newly,
+                    "attorney_action": ctx.attorney_action,
+                },
                 run_id=ctx.run_id,
             )
         )
-        return f"Committed {len(committed)} escalation(s): {', '.join(committed)}."
+        return f"Committed {len(newly)} escalation(s): {', '.join(newly)}."
 
     @tool
     def write_packet_memo(case_id: str, memo: str) -> str:

@@ -35,6 +35,10 @@ class RunContext:
     packet_memos: dict[str, str] = field(default_factory=dict)
     committed_case_ids: tuple[str, ...] = ()
     attorney_action: str = ""  # "approved" | "deferred" | "" before review
+    # Single-use lifecycle: a context that already carried a run must never
+    # carry another. Reuse would replay stale decisions and committed ids
+    # under the same run_id; the runner enforces this at entry.
+    started: bool = False
 
     @property
     def interrupt_candidates(self) -> list[TriageDecision]:
