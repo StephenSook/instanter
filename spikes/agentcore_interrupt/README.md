@@ -44,6 +44,41 @@ curl -X POST localhost:8080/invocations \
 spike writes itself, `session` relies on `S3SessionManager`, and `none` is the negative
 control that must fail.
 
-Deploying needs the AgentCore CLI (`npm install -g @aws/agentcore`), an
-`agentcore add agent --type byo --build CodeZip --framework Strands`, and an execution
-role grant for the bucket. The runtime will not start a run it cannot persist.
+## Deploying
+
+Deploying needs the AgentCore CLI (`npm install -g @aws/agentcore`) and an
+`agentcore add agent --type byo --build CodeZip --framework Strands --model-provider
+Bedrock`. Two things the CLI will not do for you, both of which failed silently the
+first time:
+
+**Environment variables do not travel through `agentcore.json`.** An `environment` map
+added there passed `agentcore deploy --dry-run` validation and the container still read
+an empty value. Set them on the control plane instead:
+
+```sh
+aws bedrock-agentcore-control update-agent-runtime \
+  --agent-runtime-id <id> \
+  --environment-variables SPIKE_BUCKET=<bucket> \
+  --agent-runtime-artifact <current artifact> \
+  --role-arn <current role> \
+  --network-configuration <current network config>
+```
+
+**The generated execution role has no access to your bucket.** Attach a policy scoped
+to it, or every persist fails with `AccessDenied`:
+
+```sh
+aws iam put-role-policy --role-name <execution-role> \
+  --policy-name SpikeStateBucket --policy-document file://policy.json
+```
+
+The runtime refuses to start a run it cannot persist, which is what made both of these
+visible rather than leaving a green run with no durable state behind it.
+
+Then point the probe at the deployment:
+
+```sh
+export SPIKE_RUNTIME_ARN=$(aws bedrock-agentcore-control list-agent-runtimes \
+  --query 'agentRuntimes[0].agentRuntimeArn' --output text)
+python probe_deployed.py
+```
