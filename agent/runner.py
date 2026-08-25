@@ -43,10 +43,14 @@ class RunReport:
     # succeeded; parity between these two sets is the run's success
     # criterion, and main() exits non-zero when it does not hold.
     failures: tuple[str, ...] = ()
+    # Cases the sweep REFUSED to compute (unparseable intake): the sweep
+    # could not protect them, so they fail the run exactly like a lost
+    # commit does. A scheduler must never see green over a dropped case.
+    refused: tuple[str, ...] = ()
 
     @property
     def succeeded(self) -> bool:
-        return not self.failures and not self.model_error
+        return not self.failures and not self.model_error and not self.refused
 
 
 def _load_records(ctx: RunContext) -> None:
@@ -207,6 +211,49 @@ def run_live(
                 )
             )
             _deterministic_floor(ctx, tools, attorney_response)
+    elif ctx.attorney_action == "approved":
+        # Approval is a decision, not a completed commit: an exception after
+        # the hook approved but before the writes finished leaves approved
+        # cases undelivered. Recover through the commit tool, which
+        # reconciles against DURABLE store state first, so recovery can
+        # never duplicate a row that actually landed.
+        tools = build_tools(ctx)
+        if not ctx.decisions:
+            tools["get_ranked_queue"]()
+        missing = [
+            d.case_id for d in ctx.interrupt_candidates if d.case_id not in ctx.committed_case_ids
+        ]
+        if missing:
+            backstop_used = True
+            ctx.audit.append(
+                AuditEvent(
+                    kind="deterministic_backstop",
+                    case_id=None,
+                    payload={
+                        "graph_status": graph_status,
+                        "reason": (
+                            "attorney approved but the commit did not complete "
+                            "for every case; recovering through the reconciling "
+                            "commit tool"
+                        ),
+                        "missing_before_recovery": missing,
+                    },
+                    run_id=ctx.run_id,
+                )
+            )
+            for decision in ctx.interrupt_candidates:
+                if decision.case_id in ctx.rationales:
+                    continue
+                ctx.rationales[decision.case_id] = _template_rationale(decision)
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="rationale_recorded",
+                        case_id=decision.case_id,
+                        payload={"template": True},
+                        run_id=ctx.run_id,
+                    )
+                )
+            tools["commit_escalations"]()
 
     report = _report(ctx, mode="live", backstop_used=backstop_used, model_error=model_error)
     ctx.audit.append(
@@ -259,6 +306,7 @@ def _report(
         backstop_used=backstop_used,
         model_error=model_error,
         failures=failures,
+        refused=tuple(sorted(ctx.refused_cases)),
     )
 
 
@@ -321,6 +369,7 @@ def main() -> None:
                 "backstop_used": report.backstop_used,
                 "model_error": report.model_error,
                 "failures": list(report.failures),
+                "refused": list(report.refused),
                 "succeeded": report.succeeded,
             },
             indent=2,

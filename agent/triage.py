@@ -103,6 +103,12 @@ class TriageCase:
     observed_hearing_or_deadline_change: bool | None = None
     observed_possible_defective_service: bool | None = None
     observation_needs_confirmation: bool = False
+    # Independent uncertainty floors (defense in depth beyond the model's
+    # own cross-field validator): open questions or a low-confidence
+    # extraction each floor at L2 on their own, whatever the model claimed
+    # about needing confirmation.
+    observation_has_ambiguities: bool = False
+    observation_low_confidence: bool = False
 
 
 @dataclass(frozen=True)
@@ -287,6 +293,22 @@ def triage_queue(
                 factors,
                 "needs_human_confirmation",
                 "the notes analysis flagged uncertain or conflicting facts for human confirmation",
+            )
+        if case.observation_has_ambiguities:
+            level = _note_floor(
+                level,
+                raised_by,
+                factors,
+                "open_questions",
+                "the notes analysis recorded open questions a staff member must answer",
+            )
+        if case.observation_low_confidence:
+            level = _note_floor(
+                level,
+                raised_by,
+                factors,
+                "low_confidence_extraction",
+                "the notes extraction is low confidence; a human must read the notes directly",
             )
         if case.observed_answer_already_filed and not case.answer_filed:
             # Fail-closed direction: a mentioned-but-unconfirmed filed answer

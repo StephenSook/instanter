@@ -507,6 +507,148 @@ def test_corrupt_escalation_line_is_loud_and_names_the_line(tmp_path: Path) -> N
         store.list_escalations()
 
 
+def test_refused_case_fails_the_run(tmp_path: Path) -> None:
+    """A refused (unparseable) case is a case the sweep could not protect:
+    it must reach the report and fail the run, never exit green."""
+    payload = {
+        "records": [
+            {
+                "case_id": "GOOD-1",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+            {
+                "case_id": "BAD-1",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": 20260901,
+                "service_method": "personal",
+            },
+        ]
+    }
+    intake = tmp_path / "intake.json"
+    intake.write_text(json.dumps(payload))
+    store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
+    ctx = RunContext(
+        run_date=RUN_DATE,
+        attorney_capacity=2,
+        store=store,
+        audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+    )
+    report = run_deterministic(ctx)
+    assert report.refused == ("BAD-1",)
+    assert not report.succeeded
+    assert report.committed == ("GOOD-1",)  # the good case was still protected
+
+
+class AmbiguousFailureStore(JsonFileCaseStore):
+    """Appends the row durably, THEN raises: the ambiguous-failure shape
+    (e.g. fsync error after the write became visible)."""
+
+    def __init__(self, intake_path: Path, escalations_path: Path) -> None:
+        super().__init__(intake_path, escalations_path)
+        self.fail_next = 0
+
+    def record_escalation(self, escalation: EscalationRecord) -> None:
+        super().record_escalation(escalation)  # the row IS durable
+        if self.fail_next > 0:
+            self.fail_next -= 1
+            raise OSError("fsync failed after the row became visible")
+
+
+def test_ambiguous_store_failure_retry_never_duplicates(tmp_path: Path) -> None:
+    store = AmbiguousFailureStore(
+        intake_path=tmp_path / "unused.json",
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    ctx = RunContext(
+        run_date=RUN_DATE,
+        attorney_capacity=2,
+        store=store,
+        audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+    )
+    ctx.records["A-1"] = good_record("A-1", service_date="2026-08-30")
+    ctx.records["B-2"] = good_record("B-2", service_date="2026-08-31")
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    for decision in ctx.interrupt_candidates:
+        tools["submit_escalation_rationale"](
+            case_id=decision.case_id,
+            disposition=decision.level.value,
+            contributing_factors=list(decision.factors)[:8],
+            rationale="Deadline has passed with no answer on file.",
+            confidence=0.9,
+        )
+
+    store.fail_next = 1  # first write lands durably but reports failure
+    first = tools["commit_escalations"]()
+    assert "STORE WRITE FAILED" in first
+
+    # Retry: reconciliation against durable state must find the landed row
+    # and write ONLY the genuinely missing case.
+    second = tools["commit_escalations"]()
+    assert "Committed 1 escalation(s)" in second
+    stored = store.list_escalations(run_id=ctx.run_id)
+    assert len(stored) == 2  # exactly one row per case despite the lie
+    assert sorted(e.case_id for e in stored) == ["A-1", "B-2"]
+    assert len(ctx.committed_case_ids) == 2
+
+
+def test_post_approval_failure_recovers_through_the_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Approval is a decision, not a completed commit: a graph that dies
+    AFTER the hook approved but before the writes finished must still end
+    with every approved case durably committed."""
+    import agent.graph as graph_module
+    from agent.runner import run_live
+
+    def exploding_after_approval(ctx: RunContext, plugins: object = None) -> object:
+        class G:
+            def __call__(self, _prompt: object) -> object:
+                ctx.attorney_action = "approved"  # the hook fired...
+                raise RuntimeError("executor died before the commit")  # ...then death
+
+        return G()
+
+    monkeypatch.setattr(graph_module, "build_triage_graph", exploding_after_approval)
+
+    ctx = seed_ctx(tmp_path)
+    report = run_live(ctx, attorney_response="approve")
+    assert report.backstop_used
+    assert len(report.committed) == 2  # recovery delivered the approved cases
+    assert report.failures == ()  # parity restored by the recovery
+    assert not report.succeeded  # the model death still fails the run
+    stored = ctx.store.list_escalations(run_id=ctx.run_id)
+    assert sorted(e.case_id for e in stored) == sorted(report.committed)
+
+
+def test_overlapping_audit_sinks_never_share_a_sequence(tmp_path: Path) -> None:
+    from agent.audit import AuditEvent
+
+    path = tmp_path / "audit.jsonl"
+    a = JsonlAuditSink(path)
+    b = JsonlAuditSink(path)
+    for i in range(3):  # interleaved appends from two live instances
+        a.append(AuditEvent(kind="tick", case_id=None, payload={"i": i}, run_id="rA"))
+        b.append(AuditEvent(kind="tick", case_id=None, payload={"i": i}, run_id="rB"))
+    seqs = [e["seq"] for e in a.read_all()]
+    assert seqs == [1, 2, 3, 4, 5, 6]
+
+
+def test_duplicate_sequence_is_rejected_on_read(tmp_path: Path) -> None:
+    from agent.audit import AuditEvent
+
+    path = tmp_path / "audit.jsonl"
+    sink = JsonlAuditSink(path)
+    sink.append(AuditEvent(kind="tick", case_id=None, payload={}, run_id="r1"))
+    line = path.read_text().splitlines()[0]
+    with path.open("a") as handle:  # forge a duplicate seq
+        handle.write(line + "\n")
+    with pytest.raises(ValueError, match="broken sequence"):
+        JsonlAuditSink(path).read_all()
+
+
 def test_corrupt_intake_file_raises_loudly(tmp_path: Path) -> None:
     intake = tmp_path / "intake.json"
     intake.write_text('{"records": [{"case_id": "X", truncated')

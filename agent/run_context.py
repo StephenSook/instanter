@@ -29,6 +29,10 @@ class RunContext:
 
     records: dict[str, IntakeRecord] = field(default_factory=dict)
     deadlines: dict[str, DeadlineResult] = field(default_factory=dict)
+    # Case-level refusals (unparseable rows): first-class run outcomes. A
+    # refused case is a case the sweep could NOT protect; it must reach the
+    # report and fail the run, never just an audit line.
+    refused_cases: dict[str, str] = field(default_factory=dict)
     observations: dict[str, ExtractedObservations] = field(default_factory=dict)
     decisions: list[TriageDecision] = field(default_factory=list)
     rationales: dict[str, EscalationRationale] = field(default_factory=dict)

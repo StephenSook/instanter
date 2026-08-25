@@ -8,6 +8,7 @@ property of the storage rather than a promise of the code.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 from dataclasses import dataclass
@@ -36,32 +37,34 @@ class JsonlAuditSink:
 
     def __init__(self, path: Path) -> None:
         self._path = path
-        # The sequence continues from the existing file, so appending
-        # multiple runs to one file never reuses a seq value: the gap
-        # detection the audit story leans on stays meaningful.
-        self._sequence = self._existing_line_count()
-
-    def _existing_line_count(self) -> int:
-        if not self._path.exists():
-            return 0
-        return sum(1 for line in self._path.read_text().splitlines() if line.strip())
 
     def append(self, event: AuditEvent) -> None:
-        self._sequence += 1
-        row = {
-            "seq": self._sequence,
-            "recorded_at": datetime.now().astimezone().isoformat(),
-            "run_id": event.run_id,
-            "kind": event.kind,
-            "case_id": event.case_id,
-            "payload": event.payload,
-        }
-        # Flush and fsync per event: an audit line either exists durably or
-        # the append raises. A legal audit trail cannot sit in a page cache.
-        with self._path.open("a") as handle:
-            handle.write(json.dumps(row, default=str) + "\n")
-            handle.flush()
-            os.fsync(handle.fileno())
+        # Sequence allocation and the append happen under one interprocess
+        # lock, with the next seq derived from the file itself at append
+        # time: two sinks (or two scheduled processes) sharing a path can
+        # never allocate the same value, and the seq stays contiguous. The
+        # fsync makes the line durable before the lock releases. (The Phase
+        # C sink moves allocation into atomic storage; this is the
+        # local-mode equivalent, sized for local-mode files.)
+        with self._path.open("a+") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                handle.seek(0)
+                seq = sum(1 for line in handle if line.strip()) + 1
+                row = {
+                    "seq": seq,
+                    "recorded_at": datetime.now().astimezone().isoformat(),
+                    "run_id": event.run_id,
+                    "kind": event.kind,
+                    "case_id": event.case_id,
+                    "payload": event.payload,
+                }
+                handle.seek(0, os.SEEK_END)
+                handle.write(json.dumps(row, default=str) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def read_all(self) -> list[dict[str, Any]]:
         if not self._path.exists():
@@ -77,4 +80,13 @@ class JsonlAuditSink:
                     f"audit file {self._path} is corrupt at line {lineno}; "
                     "refusing to read a damaged audit trail"
                 ) from exc
+        # A damaged ORDERING is as disqualifying as a damaged line: the
+        # sequence must be exactly 1..n with no duplicates and no gaps.
+        seqs = [row.get("seq") for row in rows]
+        if seqs != list(range(1, len(rows) + 1)):
+            raise ValueError(
+                f"audit file {self._path} has a broken sequence (expected "
+                f"1..{len(rows)} contiguous); refusing to read a damaged "
+                "audit trail"
+            )
         return rows
