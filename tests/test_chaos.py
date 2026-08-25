@@ -366,21 +366,31 @@ def test_attorney_response_parsing_is_strict_and_fail_closed() -> None:
         assert action == "approved", probe
 
     deferrals = [
-        "approving is denied",  # prefix-match trap
-        "Approve only 26ED00101, defer the rest",  # conditional never flattens
-        "approve please",  # qualifier defers
         "defer: in hearings",
-        "aprove",  # typo defers
-        "yes",  # ambiguity defers
+        "Defer until tomorrow's calendar clears",
+        "DEFERRED.",
     ]
     for probe in deferrals:
         action, _ = parse_attorney_response(probe)
         assert action == "deferred", probe
 
-    # Round-14: an empty or non-string value is NOT a human decision; it
-    # must never read as a deferral (a transport bug would then drop
-    # urgent cases behind a green no-op run).
-    for invalid_probe in ("", "   ", None, 42):
+    # Round-14 + round-17: anything that is not an exact approval or an
+    # explicit deferral is NOT a decision. Empty and non-string values
+    # (transport bugs) and near-misses (typos, conditionals, ambiguity)
+    # must never read as a green deferral: a typo'd scheduler wrapper
+    # previously produced perpetual green no-op runs with nothing durable
+    # recorded.
+    for invalid_probe in (
+        "",
+        "   ",
+        None,
+        42,
+        "aprove",  # typo
+        "yes",  # ambiguity
+        "approve please",  # qualifier
+        "approving is denied",  # prefix-match trap
+        "Approve only 26ED00101, defer the rest",  # conditional never flattens
+    ):
         action, _ = parse_attorney_response(invalid_probe)
         assert action == "invalid", repr(invalid_probe)
 
@@ -1963,3 +1973,46 @@ def test_cli_rejects_empty_run_date_and_zero_capacity(
             runner.main()
         assert excinfo.value.code == 2  # argparse error, loud
         capsys.readouterr()
+
+
+# --- Round-17 reproducers -----------------------------------------------------
+
+
+def test_interior_whitespace_case_ids_are_refused(tmp_path: Path) -> None:
+    """Round-17 reproducer: '26ED 00101' and '26ED  00101' (identical when
+    rendered) both swept, both committed, and their two capacity slots
+    held a genuinely distinct urgent case under a green run."""
+    ctx = make_ctx(
+        tmp_path,
+        [
+            good_record("26ED00999", service_date="2026-08-30"),
+            IntakeRecord(
+                case_id="26ED 00101",
+                jurisdiction_id="GA-FULTON",
+                service_date="2026-08-30",
+                service_method="personal",
+            ),
+            IntakeRecord(
+                case_id="26ED  00101",
+                jurisdiction_id="GA-FULTON",
+                service_date="2026-08-30",
+                service_method="personal",
+            ),
+        ],
+    )
+    tools = build_tools(ctx)
+    payload = json.loads(tools["get_ranked_queue"]())
+    assert {row["case_id"] for row in payload["queue"]} == {"26ED00999"}
+    assert len(payload["refused_cases"]) == 2
+    assert all("whitespace" in r["reason"] for r in payload["refused_cases"])
+
+
+def test_typo_approval_is_invalid_not_a_green_deferral(tmp_path: Path) -> None:
+    """Round-17 reproducer: --attorney-response 'aprove' read as a human
+    deferral and the run exited 0 green with the urgent queue undelivered
+    and nothing durable recorded."""
+    ctx = seed_ctx(tmp_path)
+    report = run_deterministic(ctx, attorney_response="aprove")
+    assert ctx.approval_invalidated
+    assert report.failures  # the urgent queue cannot vanish behind a typo
+    assert not report.succeeded

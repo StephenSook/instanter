@@ -409,8 +409,11 @@ _NUMBER_WORDS = frozenset(
         # figures exactly as "nine" does ("a dozen days", "the deadline is
         # tomorrow"). Dictionary-checked against legal vocabulary: no
         # whole-token collisions.
+        # "score" and "eve" are deliberately absent: writers echo the
+        # system's own vocabulary ("the ladder does not use a score") and
+        # "on the eve of the hearing" is idiom, while their value as
+        # quantity fabrications is marginal (round 17).
         "dozen",
-        "score",
         "fortnight",
         "couple",
         "half",
@@ -422,14 +425,19 @@ _NUMBER_WORDS = frozenset(
         "today",
         "tomorrow",
         "yesterday",
-        "eve",
     ]
 )
-# Month "May" is distinguishable from modal "may" only by case, and the
-# modal is the models' most natural hedge word. The month reads
-# capitalized in date-fabricating positions ("due by May third"); the raw
-# (pre-casefold) text is checked for exactly that form.
-_CAPITALIZED_MAY = re.compile(r"\bMay\b")
+# Month "may" versus modal "may": the modal is the models' most natural
+# hedge word ("service may be defective") and banning it starved runs
+# into the backstop; a casing-exact month ban leaked "DUE BY MAY" and
+# "due by may" straight to the attorney surface (round 17). The month is
+# recognized by DATE CONTEXT instead, on the casefolded shadows, so every
+# casing is covered while the modal stays legal: a preposition or a
+# date-qualifier immediately before "may" is the month position.
+_MAY_DATE_CONTEXT = re.compile(
+    r"\b(?:in|by|since|until|before|after|during|of|from|next|last|this|early|late|mid)"
+    r"[\s-]+may\b"
+)
 _WORD_TOKEN = re.compile(r"[a-z]+")
 
 
@@ -474,12 +482,6 @@ def reject_model_numerics(text: str, field_name: str) -> str:
             "every date, day count, and rank is rendered by the system. "
             "State the fact without the figure and resubmit."
         )
-    if _CAPITALIZED_MAY.search(text):
-        raise ValueError(
-            f"{field_name} contains the month name 'May'; quantities and "
-            "dates come only from the system's fact sheet. Use 'might' for "
-            "possibility, and state dates as facts without naming them."
-        )
     demarked = _strip_marks(normalized)
     canonical = _collapse_spaced_letters(_collapse_separated_letters(demarked))
     for variant in {
@@ -489,6 +491,12 @@ def reject_model_numerics(text: str, field_name: str) -> str:
         _strip_intra_token_punctuation(demarked),
         canonical,
     }:
+        if _MAY_DATE_CONTEXT.search(variant):
+            raise ValueError(
+                f"{field_name} names the month of May; quantities and dates "
+                "come only from the system's fact sheet. Use 'might' for "
+                "possibility, and state dates as facts without naming them."
+            )
         for token in _WORD_TOKEN.findall(variant):
             if token in _NUMBER_WORDS or _is_compound_number_word(token):
                 raise ValueError(

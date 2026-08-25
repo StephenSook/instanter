@@ -96,13 +96,14 @@ def validate_intake_types(record: IntakeRecord) -> None:
             "characters (a lookalike character cannot be distinguished "
             "from the docket id it imitates)"
         )
-    # Whitespace padding creates visually duplicate docket identities
-    # ('26ED00101' vs '26ED00101 ') that dodge duplicate detection, hold
-    # separate capacity slots, and confuse every downstream key.
-    if record.case_id != record.case_id.strip():
-        raise IntakeParseError(
-            f"case {record.case_id!r}: case_id must not begin or end with whitespace"
-        )
+    # NO whitespace anywhere: padding created visually duplicate docket
+    # identities ('26ED00101' vs '26ED00101 '), and round 17 showed
+    # INTERIOR spaces do the same one channel over ('26ED 00101' vs
+    # '26ED  00101' rendered identically, both swept, and their two
+    # capacity slots held a genuinely distinct urgent case under a green
+    # run). Fulton docket numbers contain no whitespace; fail closed.
+    if any(ch.isspace() for ch in record.case_id):
+        raise IntakeParseError(f"case {record.case_id!r}: case_id must contain no whitespace")
     for name in ("answer_filed", "amended_affidavit"):
         if type(getattr(record, name)) is not bool:
             raise IntakeParseError(
@@ -280,7 +281,9 @@ class JsonFileCaseStore:
         # case-variant sibling ('26ED00101 ', '26ed00101') contests the
         # identity instead of leaving its stale twin sweeping alone.
         def _identity_key(case_id: str) -> str:
-            return case_id.strip().casefold()
+            # Collapse ALL whitespace, not just edges: interior-space
+            # variants are the same visual identity.
+            return "".join(case_id.split()).casefold()
 
         counts: dict[str, int] = {}
         first_seen: dict[str, str] = {}
