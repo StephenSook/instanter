@@ -11,17 +11,22 @@ Answers three things the local server could not:
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import uuid
 
 import boto3
 
-ARN = (
-    "arn:aws:bedrock-agentcore:us-east-1:741030561008:runtime/"
-    "instanterspike_interrupt_spike-zcL7ZNEqRi"
-)
-client = boto3.client("bedrock-agentcore", region_name="us-east-1")
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+ARN = os.environ.get("SPIKE_RUNTIME_ARN", "")
+if not ARN:
+    raise SystemExit(
+        "Set SPIKE_RUNTIME_ARN to the deployed runtime's ARN. Find it with:\n"
+        "  aws bedrock-agentcore-control list-agent-runtimes "
+        "--query 'agentRuntimes[].agentRuntimeArn' --output text"
+    )
+client = boto3.client("bedrock-agentcore", region_name=REGION)
 
 
 def session_id() -> str:

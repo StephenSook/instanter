@@ -39,8 +39,11 @@ from strands.types.interrupt import InterruptResponseContent
 
 PROCESS_START = time.time()
 REGION = os.environ.get("AWS_REGION", "us-east-1")
-DEFAULT_BUCKET = "instanter-agentcore-spike-741030561008"
-BUCKET = os.environ.get("SPIKE_BUCKET") or DEFAULT_BUCKET
+# Deliberately no default. An S3 bucket name is account specific, and a spike that
+# silently falls back to someone else's bucket name is worse than one that refuses to
+# start. The runtime reads this from its environment; see the README for how to set it
+# on a deployed runtime, which is not through agentcore.json.
+BUCKET = os.environ.get("SPIKE_BUCKET", "")
 MODEL_ID = os.environ.get("SPIKE_MODEL_ID", "amazon.nova-lite-v1:0")
 COMMITTER_MODEL_ID = os.environ.get("SPIKE_COMMITTER_MODEL_ID", "amazon.nova-pro-v1:0")
 GATED_TOOL = "commit_item"
