@@ -1158,6 +1158,95 @@ def test_cli_run_id_flag_reaches_the_report(
     assert out["succeeded"] is True
 
 
+def test_digest_separates_fields_unambiguously(tmp_path: Path) -> None:
+    """Round-8 reproducer: separator-joined hashing let factors
+    ('safe fact', 'second fact') + rationale 'R' collide with factors
+    ('safe fact',) + rationale 'second fact\\x00R', so a mutated snapshot
+    could pass digest verification. Canonical serialization must separate
+    every field."""
+    from agent.hooks import presented_content_digest
+    from agent.models import EscalationRationale
+    from agent.triage import TriageDecision, UrgencyLevel
+
+    def ctx_with(factors: tuple[str, ...], rationale_text: str, confidence: float) -> RunContext:
+        ctx = make_ctx(tmp_path, [])
+        ctx.decisions = [
+            TriageDecision(
+                case_id="A",
+                level=UrgencyLevel.L1_INTERRUPT,
+                floor_level=UrgencyLevel.L1_INTERRUPT,
+                raised_by=("x",),
+                days_remaining=-1,
+                rank=1,
+                interrupt_now=True,
+                held_reason=None,
+                factors=factors,
+            )
+        ]
+        # model_construct bypasses validation on purpose: the digest must be
+        # collision-free even for content the UPL floor would reject.
+        ctx.rationales["A"] = EscalationRationale.model_construct(
+            case_id="A",
+            disposition="interrupt",
+            contributing_factors=["x"],
+            rationale=rationale_text,
+            confidence=confidence,
+        )
+        return ctx
+
+    joined = presented_content_digest(ctx_with(("safe fact", "second fact"), "R", 0.9), ("A",))
+    shifted = presented_content_digest(ctx_with(("safe fact",), "second fact\x00R", 0.9), ("A",))
+    assert joined != shifted  # field boundaries are unambiguous
+
+    low_conf = presented_content_digest(ctx_with(("safe fact",), "R", 0.2), ("A",))
+    high_conf = presented_content_digest(ctx_with(("safe fact",), "R", 0.9), ("A",))
+    assert low_conf != high_conf  # persisted fields are covered
+
+
+def test_malformed_raw_row_refuses_without_killing_the_sweep(tmp_path: Path) -> None:
+    """Round-8 reproducer: a raw row whose case_id is a list (unhashable)
+    or whose fields do not match the schema aborted the ENTIRE intake load
+    before any per-row refusal could happen: no valid case reached triage.
+    Malformed raw rows must become indexed refusals that fail the run while
+    the valid rows still sweep."""
+    intake = _write_intake(
+        tmp_path,
+        [
+            {
+                "case_id": ["BAD"],
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+            {
+                "case_id": "SURPRISE-1",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+                "unexpected_field": True,
+            },
+            {
+                "case_id": "GOOD-1",
+                "jurisdiction_id": "GA-FULTON",
+                "service_date": "2026-08-30",
+                "service_method": "personal",
+            },
+        ],
+    )
+    store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
+    ctx = RunContext(
+        run_date=RUN_DATE,
+        attorney_capacity=2,
+        store=store,
+        audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+    )
+    report = run_deterministic(ctx)
+    assert report.committed == ("GOOD-1",)  # the valid overdue case swept
+    assert len(report.refused) == 2  # both malformed rows are refusals
+    assert not report.succeeded
+    assert audit_kinds(ctx).count("case_refused") == 2
+
+
 def test_run_id_is_validated_at_construction(tmp_path: Path) -> None:
     """The run id scopes durable idempotency and every audit row; malformed
     ids fail at construction, not at the first durable write."""

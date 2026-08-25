@@ -86,3 +86,83 @@ def test_llm_judges_recorded_and_passing() -> None:
     assert rows, "no LLM judge rows recorded"
     pass_rate = sum(1 for v in rows if v["passed"]) / len(rows)
     assert pass_rate >= 0.75, f"LLM judge pass rate {pass_rate:.2f} below 0.75"
+
+
+# --- Evaluator honesty (round-8 reproducers) ----------------------------------
+# The evaluators themselves must fail a run RunReport marked failed: expected
+# commits landing is not success when the report also carries failures,
+# refusals, a model error, or a backstop save.
+
+
+def _shape_case(actual: dict[str, Any], expected: dict[str, Any]) -> Any:
+    from strands_evals.types.evaluation import (  # type: ignore[import-untyped]
+        EvaluationData,
+    )
+
+    return EvaluationData(input={}, actual_output=actual, expected_output=expected)
+
+
+GOOD_ACTUAL: dict[str, Any] = {
+    "committed": ["A"],
+    "attorney_action": "approved",
+    "packet_memos": 1,
+    "succeeded": True,
+    "failures": [],
+    "refused": [],
+    "missing_memos": [],
+    "model_error": "",
+    "backstop_used": False,
+    "observations": 0,
+    "deadlines_computed": 48,
+}
+GOOD_EXPECTED: dict[str, Any] = {
+    "committed": ["A"],
+    "attorney_action": "approved",
+    "succeeded": True,
+}
+
+
+def test_run_shape_passes_a_clean_run() -> None:
+    from evals.run_evals import ExpectedRunShape
+
+    [out] = ExpectedRunShape().evaluate(_shape_case(GOOD_ACTUAL, GOOD_EXPECTED))
+    assert out.test_pass
+
+
+def test_run_shape_fails_a_failed_report_despite_expected_commits() -> None:
+    """Round-8 reproducer: expected commit/action/memo values plus
+    succeeded=False, backstop_used=True, and a terminal graph error
+    previously returned test_pass=True."""
+    from evals.run_evals import ExpectedRunShape
+
+    poisoned = {
+        **GOOD_ACTUAL,
+        "succeeded": False,
+        "backstop_used": True,
+        "model_error": "graph ended with terminal status Status.FAILED",
+    }
+    [out] = ExpectedRunShape().evaluate(_shape_case(poisoned, GOOD_EXPECTED))
+    assert not out.test_pass
+
+
+def test_run_shape_fails_on_hidden_refusals_and_failures() -> None:
+    from evals.run_evals import ExpectedRunShape
+
+    for poison in (
+        {"refused": ["Q-1"]},
+        {"failures": ["Q-2"]},
+        {"missing_memos": ["A"]},
+    ):
+        [out] = ExpectedRunShape().evaluate(_shape_case({**GOOD_ACTUAL, **poison}, GOOD_EXPECTED))
+        assert not out.test_pass, f"run-shape passed despite {poison}"
+
+
+def test_chaos_degradation_fails_on_hidden_refusals() -> None:
+    from evals.run_evals import ChaosDegradation
+
+    chaos_expected = {"committed": ["A"], "attorney_action": "approved"}
+    [ok] = ChaosDegradation().evaluate(_shape_case(GOOD_ACTUAL, chaos_expected))
+    assert ok.test_pass
+    for poison in ({"refused": ["Q-1"]}, {"failures": ["Q-2"]}, {"missing_memos": ["A"]}):
+        [out] = ChaosDegradation().evaluate(_shape_case({**GOOD_ACTUAL, **poison}, chaos_expected))
+        assert not out.test_pass, f"chaos-degradation passed despite {poison}"

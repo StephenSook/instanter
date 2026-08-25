@@ -123,8 +123,29 @@ class EscalationRecord:
     attorney_note: str = ""
 
 
+@dataclass(frozen=True)
+class MalformedIntakeRow:
+    """A raw intake row the loader could not even construct: not an object,
+    unhashable or non-string case_id, unknown or missing fields. Indexed so
+    the refusal names WHICH row when no usable case id exists."""
+
+    row_key: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class IntakeLoadResult:
+    """Per-row intake load: every constructible record, plus a refusal for
+    every raw row that was not. One malformed row must never abort the
+    sweep of the rows that parsed; the malformed rows fail the run as
+    case-level refusals instead."""
+
+    records: tuple[IntakeRecord, ...]
+    malformed: tuple[MalformedIntakeRow, ...]
+
+
 class CaseStore(Protocol):
-    def load_intake(self) -> list[IntakeRecord]: ...
+    def load_intake(self) -> IntakeLoadResult: ...
 
     def record_escalation(self, escalation: EscalationRecord) -> None:
         """MUST be an atomic insert-if-absent keyed on (run_id, case_id):
@@ -142,17 +163,69 @@ class JsonFileCaseStore:
         self._intake_path = intake_path
         self._escalations_path = escalations_path
 
-    def load_intake(self) -> list[IntakeRecord]:
+    def load_intake(self) -> IntakeLoadResult:
+        # File-level corruption (unreadable file, invalid JSON, no
+        # "records" key) stays a loud raise: there is no per-row degradation
+        # when the file itself cannot be trusted.
         raw = json.loads(self._intake_path.read_text())
-        records = [IntakeRecord(**row) for row in raw["records"]]
-        if not records:
-            raise IntakeParseError("intake file contains zero records")
-        seen: set[str] = set()
+        rows = raw["records"]
+        if not isinstance(rows, list):
+            raise IntakeParseError("intake 'records' must be a JSON array")
+        records: list[IntakeRecord] = []
+        malformed: list[MalformedIntakeRow] = []
+        for index, row in enumerate(rows, start=1):
+            row_key = f"intake-row-{index}"
+            if isinstance(row, dict) and type(row.get("case_id")) is str and row["case_id"]:
+                row_key = row["case_id"]
+            if not isinstance(row, dict):
+                malformed.append(
+                    MalformedIntakeRow(row_key, f"intake row {index} is not a JSON object")
+                )
+                continue
+            try:
+                record = IntakeRecord(**row)
+            except TypeError as exc:
+                # Unknown fields, missing required fields: the row does not
+                # match the intake schema at all.
+                malformed.append(
+                    MalformedIntakeRow(
+                        row_key,
+                        f"intake row {index} does not match the intake schema: {str(exc)[:200]}",
+                    )
+                )
+                continue
+            if type(record.case_id) is not str or not record.case_id:
+                # A non-string case_id (a list, a number) constructs fine on
+                # a plain dataclass but detonates as a dict key before any
+                # per-case validation could refuse it; own it here.
+                malformed.append(
+                    MalformedIntakeRow(
+                        row_key,
+                        f"intake row {index} case_id {record.case_id!r} must be a non-empty string",
+                    )
+                )
+                continue
+            records.append(record)
+        # Duplicate ids: identity is ambiguous for EVERY row carrying the
+        # id, so all of them are refused and none is swept; the rest of the
+        # intake still processes.
+        counts: dict[str, int] = {}
         for record in records:
-            if record.case_id in seen:
-                raise IntakeParseError(f"duplicate case_id {record.case_id!r} in intake")
-            seen.add(record.case_id)
-        return records
+            counts[record.case_id] = counts.get(record.case_id, 0) + 1
+        duplicated = {case_id for case_id, count in counts.items() if count > 1}
+        if duplicated:
+            for case_id in sorted(duplicated):
+                malformed.append(
+                    MalformedIntakeRow(
+                        case_id,
+                        f"case_id {case_id!r} appears more than once in the intake; "
+                        "identity is ambiguous and every row carrying it is refused",
+                    )
+                )
+            records = [r for r in records if r.case_id not in duplicated]
+        if not records and not malformed:
+            raise IntakeParseError("intake file contains zero records")
+        return IntakeLoadResult(records=tuple(records), malformed=tuple(malformed))
 
     def record_escalation(self, escalation: EscalationRecord) -> None:
         """Atomic insert-if-absent on (run_id, case_id): the check and the

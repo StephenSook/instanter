@@ -85,8 +85,12 @@ def test_duplicate_case_ids_refuse(tmp_path: Path) -> None:
     intake = tmp_path / "intake.json"
     intake.write_text(json.dumps(payload))
     store = JsonFileCaseStore(intake_path=intake, escalations_path=tmp_path / "e.jsonl")
-    with pytest.raises(IntakeParseError, match="duplicate"):
-        store.load_intake()
+    result = store.load_intake()
+    # Identity is ambiguous for every row carrying the id: none is swept,
+    # the refusal fails the run, and the rest of an intake still processes.
+    assert result.records == ()
+    assert [m.row_key for m in result.malformed] == ["X"]
+    assert "more than once" in result.malformed[0].reason
 
 
 # --- Tool contracts -----------------------------------------------------------

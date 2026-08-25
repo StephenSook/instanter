@@ -9,6 +9,7 @@ without the human.
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any
 
 from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent, HookProvider, HookRegistry
@@ -20,26 +21,35 @@ _GATED_TOOL = "commit_escalations"
 
 
 def presented_content_digest(ctx: RunContext, case_ids: tuple[str, ...]) -> str:
-    """Digest of everything the attorney is shown for these cases: id,
-    rank, days remaining, factors, and the exact rationale text. Approval
-    binds to this content; any change to it voids the approval."""
-    digest = hashlib.sha256()
+    """Digest of everything the attorney is shown AND everything the commit
+    would persist for these cases. Approval binds to this content; any
+    change to it voids the approval.
+
+    Canonical JSON, not separator-joined bytes: joining free text on a
+    separator lets two different snapshots serialize to identical bytes
+    when a field's content contains the separator (factors ('a', 'b') with
+    rationale 'r' vs factors ('a',) with rationale 'b\\x00r'). JSON escapes
+    every string and keeps the structure explicit, so distinct snapshots
+    cannot collide by construction."""
+    entries = []
     for case_id in sorted(case_ids):
         decision = ctx.decision_for(case_id)
         rationale = ctx.rationales.get(case_id)
-        digest.update(case_id.encode())
-        digest.update(b"\x00")
-        if decision is not None:
-            digest.update(str(decision.rank).encode())
-            digest.update(b"\x00")
-            digest.update(str(decision.days_remaining).encode())
-            digest.update(b"\x00")
-            for factor in decision.factors:
-                digest.update(factor.encode())
-                digest.update(b"\x00")
-        digest.update((rationale.rationale if rationale else "").encode())
-        digest.update(b"\x01")
-    return digest.hexdigest()
+        entries.append(
+            {
+                "case_id": case_id,
+                "rank": decision.rank if decision else None,
+                "days_remaining": decision.days_remaining if decision else None,
+                "level": decision.level.value if decision else None,
+                "held_reason": decision.held_reason if decision else None,
+                "factors": list(decision.factors) if decision else None,
+                "rationale": rationale.rationale if rationale else None,
+                "disposition": rationale.disposition if rationale else None,
+                "confidence": rationale.confidence if rationale else None,
+            }
+        )
+    canonical = json.dumps(entries, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def bind_approval(ctx: RunContext, case_ids: tuple[str, ...]) -> str:
