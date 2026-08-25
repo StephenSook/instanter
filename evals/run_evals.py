@@ -176,6 +176,8 @@ class ExpectedRunShape(Evaluator[dict[str, Any], dict[str, Any]]):
             failures.append(f"model_error recorded: {actual.get('model_error')}")
         if actual.get("backstop_used"):
             failures.append("backstop_used: the model layer did not finish its own sweep")
+        if actual.get("memos_grounded") is False:
+            failures.append("packet memo facts diverge from engine state")
         ok = not failures
         return [
             EvaluationOutput(
@@ -222,6 +224,8 @@ class ChaosDegradation(Evaluator[dict[str, Any], dict[str, Any]]):
         for channel in ("failures", "refused", "missing_memos"):
             if actual.get(channel):
                 failures.append(f"{channel} nonempty under chaos: {actual.get(channel)}")
+        if actual.get("memos_grounded") is False:
+            failures.append("packet memo facts diverge from engine state under chaos")
         ok = not failures
         return [
             EvaluationOutput(
@@ -275,6 +279,22 @@ def _run_graph_case(
     rationales = [
         e["payload"].get("rationale", "") for e in events if e["kind"] == "rationale_recorded"
     ]
+    # Memo grounding: every recorded packet memo must carry the engine's
+    # own effective deadline for its case (the fact sheet is deterministic;
+    # a memo missing its case's deadline means fabricated or missing facts).
+    effective_by_case = {
+        e["case_id"]: str(e["payload"].get("effective", ""))
+        for e in events
+        if e["kind"] == "deadline_computed"
+    }
+    memos_by_case = {
+        e["case_id"]: str(e["payload"].get("memo", ""))
+        for e in events
+        if e["kind"] == "packet_memo_recorded"
+    }
+    memos_grounded = all(
+        effective_by_case.get(case_id, "") in memo for case_id, memo in memos_by_case.items()
+    )
     return {
         "output": {
             "committed": list(report.committed),
@@ -285,6 +305,7 @@ def _run_graph_case(
             "deadlines_computed": kinds.count("deadline_computed"),
             "rejections": kinds.count("observation_rejected") + kinds.count("rationale_rejected"),
             "backstop_used": report.backstop_used,
+            "memos_grounded": memos_grounded,
             # The complete RunReport outcome: evaluators assert these, so a
             # run the report marks failed can never score as a pass.
             "succeeded": report.succeeded,

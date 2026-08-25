@@ -59,6 +59,11 @@ class RunContext:
     # changed during the pause voids the approval, fail closed.
     pending_approval_digest: str | None = None
     approval_digest: str | None = None
+    # Set when a pending approval was VOIDED (presented content changed
+    # while the attorney decision was in flight). No human resolved the
+    # candidates, so the run still owes them: the floor commits them as
+    # pending review and the report can never read green over them.
+    approval_invalidated: bool = False
     # Single-use lifecycle: a context that already carried a run must never
     # carry another. Reuse would replay stale decisions and committed ids
     # under the same run_id; the runner enforces this at entry.

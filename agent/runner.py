@@ -136,29 +136,14 @@ def _apply_attorney_decision(ctx: RunContext, tools: dict[str, Any], response: s
 
 def _ensure_packet_memos(ctx: RunContext, tools: dict[str, Any]) -> None:
     """Every committed escalation must carry an attorney-packet cover memo.
-    When the drafter never ran (floor or recovery paths) or shortchanged a
-    case, a clearly-labeled template memo of deterministic facts fills the
+    The memo's fact sheet is generated deterministically on EVERY path (the
+    drafter only ever adds reviewer notes), so when the drafter never ran
+    or shortchanged a case, writing the memo with empty notes completes the
     packet; the report's memo parity remains the final net."""
     for case_id in ctx.committed_case_ids:
         if case_id in ctx.packet_memos:
             continue
-        decision = ctx.decision_for(case_id)
-        deadline = ctx.deadlines.get(case_id)
-        record = ctx.records.get(case_id)
-        parts = ["[MODEL DISABLED: template memo]"]
-        if deadline is not None and deadline.effective_deadline is not None:
-            parts.append(f"Effective deadline {deadline.effective_deadline}.")
-        if decision is not None:
-            parts.append(
-                f"{decision.days_remaining} day(s) remaining at the run date; "
-                f"queue rank {decision.rank}."
-            )
-        if record is not None:
-            parts.append(f"Service method recorded as {record.service_method}.")
-        if deadline is not None and deadline.flags:
-            parts.append("Flags: " + ", ".join(f.code.value for f in deadline.flags) + ".")
-        parts.append("Staff verify the intake facts against the tenant record.")
-        tools["write_packet_memo"](case_id=case_id, memo=" ".join(parts)[:1500])
+        tools["write_packet_memo"](case_id=case_id, notes="")
 
 
 def _rank_and_template(ctx: RunContext, tools: dict[str, Any]) -> None:
@@ -324,7 +309,10 @@ def run_live(
     # saw is pending, and the console review is where it gets its human.
     backstop_used = False
     tools: dict[str, Any] | None = None
-    if not ctx.attorney_action:
+    if not ctx.attorney_action or ctx.approval_invalidated:
+        # An invalidated approval left candidates NO human resolved (the
+        # recorded deferral is synthetic); the unattended floor owes them a
+        # pending-review commit exactly as if no decision existed.
         tools = build_tools(ctx)
         if ctx.interrupt_candidates or not ctx.decisions:
             backstop_used = True
@@ -445,6 +433,10 @@ def _report(
         # it. If the approved cases are not durably committed, the run
         # failed, whatever the last recorded action says.
         or ctx.approved_case_ids is not None
+        # A voided approval is equally outstanding: nobody resolved the
+        # candidates, so they must be durably committed (pending review) or
+        # the run failed.
+        or ctx.approval_invalidated
     )
     if obligation_outstanding:
         owed: list[str] = []

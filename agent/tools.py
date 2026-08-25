@@ -30,6 +30,31 @@ from engine.deadline import compute_deadline
 from engine.rules import RULES
 
 
+def packet_facts(ctx: RunContext, case_id: str) -> str:
+    """Deterministic attorney-packet fact sheet: every number and date in a
+    memo comes from engine state, never from a model. (A drafter with no
+    facts source fabricated day counts in live runs; memo facts are
+    therefore generated here on every path, and the drafter only ever adds
+    reviewer notes.)"""
+    decision = ctx.decision_for(case_id)
+    deadline = ctx.deadlines.get(case_id)
+    record = ctx.records.get(case_id)
+    parts: list[str] = []
+    if deadline is not None and deadline.effective_deadline is not None:
+        parts.append(f"Effective deadline {deadline.effective_deadline}.")
+    if decision is not None:
+        parts.append(
+            f"{decision.days_remaining} day(s) remaining at the run date "
+            f"{ctx.run_date.isoformat()}; queue rank {decision.rank}."
+        )
+    if record is not None:
+        parts.append(f"Service method recorded as {record.service_method}.")
+    if deadline is not None and deadline.flags:
+        parts.append("Flags: " + ", ".join(f.code.value for f in deadline.flags) + ".")
+    parts.append("Staff verify the intake facts against the tenant record.")
+    return " ".join(parts)
+
+
 def _dump_validation_error(exc: ValidationError) -> str:
     issues = "; ".join(f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in exc.errors())
     return f"VALIDATION FAILED: {issues}. Correct the output and resubmit."
@@ -245,6 +270,7 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                     "held_reason": d.held_reason,
                     "factors": list(d.factors),
                     "raised_by": list(d.raised_by),
+                    "flags": list(d.flags),
                     "observation_summary": obs.summary if obs else None,
                     "observation_needs_confirmation": (
                         obs.needs_human_confirmation if obs else None
@@ -570,14 +596,16 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         return f"Committed {len(newly)} escalation(s): {', '.join(newly)}.{note}"
 
     @tool
-    def write_packet_memo(case_id: str, memo: str) -> str:
+    def write_packet_memo(case_id: str, notes: str = "") -> str:
         """Record the attorney-facing cover memo for one committed escalation.
 
-        The memo restates the operative facts (deadline, service method,
-        flags, queue position) for the review packet's cover sheet. It must
-        contain no advice and no legal conclusions; the packet's draft
-        answer skeleton itself is generated deterministically with every
-        defense field blank.
+        The memo's fact sheet (effective deadline, days remaining, queue
+        rank, service method, flags) is generated DETERMINISTICALLY from
+        engine state; never restate numbers or dates yourself. notes is
+        optional: short open questions staff should confirm, drawn from the
+        recorded observations, in plain factual language with no advice and
+        no legal conclusions. Pass notes as an empty string when there is
+        nothing to add.
         """
         if case_id not in ctx.committed_case_ids:
             return f"NOT COMMITTED: {case_id!r} has no committed escalation this run."
@@ -585,20 +613,24 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
             return f"ALREADY RECORDED: {case_id} has a packet memo this run; do not submit another."
         from agent.models import _reject_advice_language  # runtime boundary, same floor
 
-        try:
-            _reject_advice_language(memo, "memo")
-        except ValueError as exc:
-            # A drafter drifting into advice language is a UPL-boundary
-            # event; it must be diagnosable from the audit trail alone.
-            ctx.audit.append(
-                AuditEvent(
-                    kind="memo_rejected",
-                    case_id=case_id,
-                    payload={"reason": str(exc)[:300]},
-                    run_id=ctx.run_id,
+        if notes:
+            try:
+                _reject_advice_language(notes, "notes")
+            except ValueError as exc:
+                # A drafter drifting into advice language is a UPL-boundary
+                # event; it must be diagnosable from the audit trail alone.
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="memo_rejected",
+                        case_id=case_id,
+                        payload={"reason": str(exc)[:300]},
+                        run_id=ctx.run_id,
+                    )
                 )
-            )
-            return f"VALIDATION FAILED: {exc}"
+                return f"VALIDATION FAILED: {exc}"
+        memo = packet_facts(ctx, case_id)
+        if notes:
+            memo = f"{memo} Reviewer notes: {notes.strip()}"[:1500]
         ctx.packet_memos[case_id] = memo
         ctx.audit.append(
             AuditEvent(

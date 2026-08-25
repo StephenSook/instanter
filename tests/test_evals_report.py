@@ -112,6 +112,7 @@ GOOD_ACTUAL: dict[str, Any] = {
     "missing_memos": [],
     "model_error": "",
     "backstop_used": False,
+    "memos_grounded": True,
     "observations": 0,
     "deadlines_computed": 48,
 }
@@ -152,6 +153,7 @@ def test_run_shape_fails_on_hidden_refusals_and_failures() -> None:
         {"refused": ["Q-1"]},
         {"failures": ["Q-2"]},
         {"missing_memos": ["A"]},
+        {"memos_grounded": False},
     ):
         [out] = ExpectedRunShape().evaluate(_shape_case({**GOOD_ACTUAL, **poison}, GOOD_EXPECTED))
         assert not out.test_pass, f"run-shape passed despite {poison}"
@@ -163,6 +165,11 @@ def test_chaos_degradation_fails_on_hidden_refusals() -> None:
     chaos_expected = {"committed": ["A"], "attorney_action": "approved"}
     [ok] = ChaosDegradation().evaluate(_shape_case(GOOD_ACTUAL, chaos_expected))
     assert ok.test_pass
-    for poison in ({"refused": ["Q-1"]}, {"failures": ["Q-2"]}, {"missing_memos": ["A"]}):
+    for poison in (
+        {"refused": ["Q-1"]},
+        {"failures": ["Q-2"]},
+        {"missing_memos": ["A"]},
+        {"memos_grounded": False},
+    ):
         [out] = ChaosDegradation().evaluate(_shape_case({**GOOD_ACTUAL, **poison}, chaos_expected))
         assert not out.test_pass, f"chaos-degradation passed despite {poison}"
