@@ -64,6 +64,11 @@ class RunContext:
     # candidates, so the run still owes them: the floor commits them as
     # pending review and the report can never read green over them.
     approval_invalidated: bool = False
+    # Canonical digest of this invocation's inputs (run date, capacity,
+    # records, malformed rows), set at load. Part of the durable run
+    # manifest a stable run id reserves at first commit; a retry whose
+    # digest differs is a different sweep and fails closed.
+    inputs_digest: str = ""
     # Single-use lifecycle: a context that already carried a run must never
     # carry another. Reuse would replay stale decisions and committed ids
     # under the same run_id; the runner enforces this at entry.

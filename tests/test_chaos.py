@@ -11,6 +11,7 @@ evals harness, not here.
 import json
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1431,3 +1432,105 @@ def test_stable_run_id_retry_over_mutated_intake_conflicts(tmp_path: Path) -> No
     assert second_ctx.committed_case_ids == ()
     rows = [json.loads(line) for line in (tmp_path / "escalations.jsonl").read_text().splitlines()]
     assert [r["case_id"] for r in rows] == ["A-1"]  # nothing merged in
+
+
+# --- Round-12 reproducers -----------------------------------------------------
+
+
+def test_partial_retry_with_mutated_intake_conflicts_on_the_manifest(
+    tmp_path: Path,
+) -> None:
+    """Round-12 reproducer: first run (candidates A and B) commits A, then
+    dies before B. A retry with the same run id over mutated intake
+    (candidates A and C) previously passed the subset check, committed C,
+    and reported green while B silently disappeared. The durable manifest
+    reserved by the FIRST commit now refuses the divergent retry."""
+
+    def build(
+        records: list[IntakeRecord], store: JsonFileCaseStore
+    ) -> tuple[RunContext, dict[str, Any]]:
+        ctx = RunContext(
+            run_date=RUN_DATE,
+            attorney_capacity=2,
+            store=store,
+            audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+            run_id="evt-overlap-1",
+        )
+        for record in records:
+            ctx.records[record.case_id] = record
+        tools = build_tools(ctx)
+        tools["get_ranked_queue"]()
+        for decision in ctx.interrupt_candidates:
+            tools["submit_escalation_rationale"](
+                case_id=decision.case_id,
+                disposition=decision.level.value,
+                explanation="Deadline has passed with no answer on file.",
+                confidence=0.9,
+            )
+        ctx.attorney_action = "approved"
+        bind_approval(ctx, tuple(d.case_id for d in ctx.interrupt_candidates))
+        return ctx, tools
+
+    failing = FailingAfterOneStore(
+        intake_path=tmp_path / "unused.json",
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    first_ctx, first_tools = build(
+        [good_record("A-1", service_date="2026-08-30"), good_record("B-2", "2026-08-31")],
+        failing,
+    )
+    partial = first_tools["commit_escalations"]()
+    assert "STORE WRITE FAILED" in partial
+    assert first_ctx.committed_case_ids == ("A-1",)  # B-2 never landed
+
+    retry_store = JsonFileCaseStore(
+        intake_path=tmp_path / "unused.json",
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    second_ctx, second_tools = build(
+        [good_record("A-1", service_date="2026-08-30"), good_record("C-3", "2026-08-31")],
+        retry_store,
+    )
+    outcome = second_tools["commit_escalations"]()
+    assert "STORE CONFLICT" in outcome
+    assert second_ctx.committed_case_ids == ()
+    rows = [json.loads(line) for line in (tmp_path / "escalations.jsonl").read_text().splitlines()]
+    assert [r["case_id"] for r in rows] == ["A-1"]  # C never merged in
+
+
+def test_oversized_memo_is_refused_never_sliced(tmp_path: Path) -> None:
+    """Round-12 reproducer: a huge first ambiguity previously pushed the
+    second past the slice and the tool reported success. The memo is now
+    refused whole; the packet stays incomplete and loud."""
+    from agent.models import ExtractedObservations
+
+    ctx = make_ctx(tmp_path, [good_record("A-1", service_date="2026-08-30")], capacity=1)
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    decision = ctx.interrupt_candidates[0]
+    tools["submit_escalation_rationale"](
+        case_id="A-1",
+        disposition=decision.level.value,
+        explanation="Deadline has passed with no answer on file.",
+        confidence=0.9,
+    )
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, ("A-1",))
+    tools["commit_escalations"]()
+    # model_construct bypasses validation on purpose: defense in depth
+    # against an ambiguity that slipped past the per-item bound.
+    ctx.observations["A-1"] = ExtractedObservations.model_construct(
+        summary="s",
+        ambiguities=["x" * 4200, "Which hearing date is correct?"],
+        needs_human_confirmation=True,
+        confidence=0.9,
+        mentions_service_by_posting=None,
+        mentions_answer_already_filed=None,
+        mentions_hearing_or_deadline_change=None,
+        mentions_possible_defective_service=None,
+    )
+    refused = tools["write_packet_memo"](case_id="A-1", notes="")
+    assert "VALIDATION FAILED" in refused
+    assert "A-1" not in ctx.packet_memos  # nothing sliced, nothing recorded
+    kinds = audit_kinds(ctx)
+    assert "memo_rejected" in kinds

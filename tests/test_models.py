@@ -205,3 +205,41 @@ def test_uncertainty_with_confirmation_is_accepted() -> None:
         confidence=0.4,
     )
     assert obs.needs_human_confirmation
+
+
+# --- Round-12: model-authored quantities in words, ambiguity discipline -------
+
+
+def test_ambiguities_reject_digits_and_number_words() -> None:
+    for poisoned in (
+        ["Could the deadline instead be 2099-12-31 with 999 days remaining?"],
+        ["Could the deadline instead be December thirty first?"],
+        ["Is the rank nine hundred ninety nine?"],
+    ):
+        with pytest.raises(ValidationError):
+            ExtractedObservations(
+                summary="Notes are unclear about the deadline.",
+                ambiguities=poisoned,
+                needs_human_confirmation=True,
+                confidence=0.8,
+            )
+
+
+def test_ambiguities_reject_oversized_entries() -> None:
+    with pytest.raises(ValidationError, match="160"):
+        ExtractedObservations(
+            summary="Notes are unclear.",
+            ambiguities=["Confirm whether " + "the tenant record matches " * 20 + "?"],
+            needs_human_confirmation=True,
+            confidence=0.8,
+        )
+
+
+def test_ambiguities_accept_digitless_open_questions() -> None:
+    obs = ExtractedObservations(
+        summary="Notes mention conflicting hearing dates.",
+        ambiguities=["Which hearing date is correct?"],
+        needs_human_confirmation=True,
+        confidence=0.8,
+    )
+    assert obs.ambiguities

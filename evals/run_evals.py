@@ -316,7 +316,16 @@ def _run_graph_case(
         ambiguities_present = all(
             ambiguity in memo for ambiguity in ambiguities_by_case.get(case_id, [])
         )
-        return anchored and ambiguities_present and not any(ch.isdigit() for ch in notes_tail)
+        # Every model-authored memo section is digit-free: the notes tail
+        # AND the recorded-open-questions segment (round 12: a numeric
+        # ambiguity would plant a fabricated figure inside the fact sheet).
+        questions_segment = ""
+        if "Open questions recorded at intake analysis:" in memo:
+            questions_segment = memo.split("Open questions recorded at intake analysis:", 1)[
+                1
+            ].split("Staff verify the intake facts", 1)[0]
+        model_sections_clean = not any(ch.isdigit() for ch in notes_tail + questions_segment)
+        return anchored and ambiguities_present and model_sections_clean
 
     memos_grounded = all(_memo_grounded(cid, memo) for cid, memo in memos_by_case.items())
     return {

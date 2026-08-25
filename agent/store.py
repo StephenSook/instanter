@@ -144,6 +144,21 @@ class IntakeLoadResult:
     malformed: tuple[MalformedIntakeRow, ...]
 
 
+@dataclass(frozen=True)
+class RunManifest:
+    """The immutable identity of one scheduler invocation: what a stable
+    run id PROMISES. The first commit attempt reserves it durably; every
+    retry must present the identical manifest or fail closed, so two
+    different sweeps (mutated intake, changed capacity, a shifted queue)
+    can never merge under one run id."""
+
+    run_id: str
+    inputs_digest: str
+    candidates: tuple[str, ...]
+    run_date: str
+    capacity: int
+
+
 class CaseStore(Protocol):
     def load_intake(self) -> IntakeLoadResult: ...
 
@@ -155,6 +170,15 @@ class CaseStore(Protocol):
 
     def list_escalations(self, run_id: str | None = None) -> list[EscalationRecord]: ...
 
+    def reserve_run_manifest(self, manifest: RunManifest) -> RunManifest:
+        """MUST be an atomic insert-if-absent keyed on run_id: the FIRST
+        reservation records the manifest durably and returns it; every
+        later call returns the ORIGINAL stored manifest unchanged. The
+        caller compares the returned manifest with its own and fails
+        closed on any difference. (The Phase C DynamoDB store makes this a
+        conditional write.)"""
+        ...
+
 
 class JsonFileCaseStore:
     """Seed-file intake + append-only escalation log. Demo/local backend."""
@@ -162,6 +186,7 @@ class JsonFileCaseStore:
     def __init__(self, intake_path: Path, escalations_path: Path) -> None:
         self._intake_path = intake_path
         self._escalations_path = escalations_path
+        self._manifests_path = escalations_path.with_name(escalations_path.name + ".manifests")
 
     def load_intake(self) -> IntakeLoadResult:
         # File-level corruption (unreadable file, invalid JSON, no
@@ -272,6 +297,33 @@ class JsonFileCaseStore:
                 os.fsync(handle.fileno())
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def reserve_run_manifest(self, manifest: RunManifest) -> RunManifest:
+        """Insert-if-absent under the interprocess lock, fsynced: the first
+        writer's manifest is the durable truth for this run id."""
+        with self._manifests_path.open("a+") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                handle.seek(0)
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    existing = json.loads(line)
+                    if existing.get("run_id") == manifest.run_id:
+                        return RunManifest(
+                            run_id=existing["run_id"],
+                            inputs_digest=existing["inputs_digest"],
+                            candidates=tuple(existing["candidates"]),
+                            run_date=existing["run_date"],
+                            capacity=existing["capacity"],
+                        )
+                handle.seek(0, os.SEEK_END)
+                handle.write(json.dumps(asdict(manifest)) + "\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return manifest
 
     def list_escalations(self, run_id: str | None = None) -> list[EscalationRecord]:
         if not self._escalations_path.exists():

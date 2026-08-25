@@ -17,11 +17,17 @@ from strands import tool
 
 from agent.audit import AuditEvent
 from agent.hooks import presented_content_digest
-from agent.models import LOW_CONFIDENCE_THRESHOLD, EscalationRationale, ExtractedObservations
+from agent.models import (
+    LOW_CONFIDENCE_THRESHOLD,
+    EscalationRationale,
+    ExtractedObservations,
+    reject_model_numerics,
+)
 from agent.run_context import RunContext
 from agent.store import (
     EscalationRecord,
     IntakeParseError,
+    RunManifest,
     to_case_input,
     validate_intake_types,
 )
@@ -347,29 +353,29 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 f"NOT AN INTERRUPT CASE: {case_id} is {decision.level.value} "
                 "this run; rationales are only written for interrupt-now cases."
             )
-        if any(ch.isdigit() for ch in explanation):
+        try:
             # The attorney-facing numbers all come from engine state; a
-            # model-authored figure beside them is exactly the fabrication
-            # the round-9 memo fix closed, resurfacing one field over. The
+            # model-authored figure beside them, in digits OR words ("nine
+            # hundred ninety nine days"), is exactly the fabrication the
+            # round-9 memo fix closed, resurfacing one field over. The
             # error text states the exact way out (rephrase, or submit an
             # empty explanation): a live writer retries on error text, and
             # a rejection with no stated recovery starves the whole sweep
             # into the floor (observed live: ten straight rejections, zero
             # commits, backstop delivery).
+            reject_model_numerics(explanation, "explanation")
+        except ValueError as exc:
             ctx.audit.append(
                 AuditEvent(
                     kind="rationale_rejected",
                     case_id=case_id,
-                    payload={"reason": "numeric_explanation"},
+                    payload={"reason": "numeric_explanation", "detail": str(exc)[:200]},
                     run_id=ctx.run_id,
                 )
             )
             return (
-                "VALIDATION FAILED: explanation must contain no digits; "
-                "every date, day count, and rank is rendered by the system. "
-                "Resubmit with the numbers written out as words or removed, "
-                "or resubmit with explanation set to the empty string to "
-                "record the deterministic facts alone."
+                f"VALIDATION FAILED: {exc} Or resubmit with explanation set "
+                "to the empty string to record the deterministic facts alone."
             )
         body = f"{rationale_facts(ctx, case_id)} Writer explanation: {explanation.strip()}"
         if not explanation.strip():
@@ -533,13 +539,52 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 record.attorney_note,
             )
 
+        # Run-scope integrity, part 1: the durable manifest. The FIRST
+        # commit attempt for a run id reserves (inputs digest, candidate
+        # set, run date, capacity) atomically; every retry must present the
+        # identical manifest. A subset overlap is not enough (a partial
+        # first commit plus mutated intake can leave the durable rows
+        # inside the retry's candidate set while an original urgent case
+        # silently disappears), so the comparison is against what the
+        # ORIGINAL invocation promised, not against what happens to be on
+        # disk.
+        own_manifest = RunManifest(
+            run_id=ctx.run_id,
+            inputs_digest=ctx.inputs_digest,
+            candidates=tuple(sorted(d.case_id for d in ctx.interrupt_candidates)),
+            run_date=ctx.run_date.isoformat(),
+            capacity=ctx.attorney_capacity,
+        )
+        stored_manifest = ctx.store.reserve_run_manifest(own_manifest)
+        if stored_manifest != own_manifest:
+            ctx.audit.append(
+                AuditEvent(
+                    kind="store_conflict",
+                    case_id=None,
+                    payload={
+                        "reason": (
+                            "this run id was reserved by an invocation with "
+                            "different inputs; a stable run id promises the "
+                            "same sweep, and this retry is a different one"
+                        ),
+                        "original_candidates": list(stored_manifest.candidates),
+                        "retry_candidates": list(own_manifest.candidates),
+                    },
+                    run_id=ctx.run_id,
+                )
+            )
+            return (
+                "STORE CONFLICT: this run id was reserved by an invocation "
+                "with different inputs (original candidates: "
+                f"{', '.join(stored_manifest.candidates) or 'none'}; this retry: "
+                f"{', '.join(own_manifest.candidates) or 'none'}). Nothing was "
+                "committed; staff must reconcile the store."
+            )
         stored = {e.case_id: e for e in ctx.store.list_escalations(run_id=ctx.run_id)}
-        # Run-scope integrity: a stable invocation id promises the SAME
-        # inputs. Durable rows under this run id for cases outside the
-        # current interrupt set mean the retry's sweep diverged from the
-        # original invocation (intake changed between attempts); merging
-        # the two under one id would hide a stale escalation behind a green
-        # retry. Fail closed before any write.
+        # Run-scope integrity, part 2 (defense in depth): durable rows for
+        # cases outside the current interrupt set mean the sweeps diverged
+        # even if the manifest was somehow satisfied. Fail closed before
+        # any write.
         candidate_ids = {d.case_id for d in ctx.interrupt_candidates}
         foreign = sorted(cid for cid in stored if cid not in candidate_ids)
         if foreign:
@@ -711,16 +756,12 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
 
         if notes:
             try:
-                if any(ch.isdigit() for ch in notes):
-                    # Notes are structurally incapable of carrying a date, a
-                    # day count, or a rank: every number in a memo comes from
-                    # the deterministic fact sheet, and a note stating a
-                    # contradictory figure beside it would defeat exactly
-                    # that guarantee.
-                    raise ValueError(
-                        "notes must contain no digits; every date, day "
-                        "count, and rank comes from the system's fact sheet"
-                    )
+                # Notes are structurally incapable of carrying a date, a
+                # day count, or a rank, in digits or in words: every number
+                # in a memo comes from the deterministic fact sheet, and a
+                # note stating a contradictory figure beside it would
+                # defeat exactly that guarantee.
+                reject_model_numerics(notes, "notes")
                 _reject_advice_language(notes, "notes")
             except ValueError as exc:
                 # A drafter drifting into advice language is a UPL-boundary
@@ -737,7 +778,23 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         memo = packet_facts(ctx, case_id)
         if notes:
             memo = f"{memo} Reviewer notes: {notes.strip()}"
-        memo = memo[:1500]
+        if len(memo) > 4000:
+            # Never slice: a truncated memo silently drops recorded facts
+            # (a long first ambiguity previously swallowed the second).
+            # Refuse loudly; the packet stays incomplete and the report's
+            # missing-memo parity keeps the run red until it is resolved.
+            ctx.audit.append(
+                AuditEvent(
+                    kind="memo_rejected",
+                    case_id=case_id,
+                    payload={"reason": "memo_too_long", "length": len(memo)},
+                    run_id=ctx.run_id,
+                )
+            )
+            return (
+                "VALIDATION FAILED: the assembled memo exceeds the packet "
+                "limit; shorten notes and resubmit. Nothing was recorded."
+            )
         ctx.packet_memos[case_id] = memo
         ctx.audit.append(
             AuditEvent(

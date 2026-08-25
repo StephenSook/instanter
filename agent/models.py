@@ -299,6 +299,98 @@ def _reject_advice_language(text: str, field_name: str) -> str:
     return text
 
 
+# Model-authored packet text may carry no quantities at all: digits are the
+# obvious channel, but "nine hundred ninety nine days" and "December thirty
+# first" fabricate figures just as effectively, so number words and month
+# names are banned wherever the deterministic fact sheet is the only
+# legitimate source of numbers.
+_NUMBER_WORDS = frozenset(
+    [
+        "zero",
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "eleven",
+        "twelve",
+        "thirteen",
+        "fourteen",
+        "fifteen",
+        "sixteen",
+        "seventeen",
+        "eighteen",
+        "nineteen",
+        "twenty",
+        "thirty",
+        "forty",
+        "fifty",
+        "sixty",
+        "seventy",
+        "eighty",
+        "ninety",
+        "hundred",
+        "thousand",
+        "million",
+        "first",
+        "second",
+        "third",
+        "fourth",
+        "fifth",
+        "sixth",
+        "seventh",
+        "eighth",
+        "ninth",
+        "tenth",
+        "eleventh",
+        "twelfth",
+        "thirteenth",
+        "twentieth",
+        "thirtieth",
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ]
+)
+_WORD_TOKEN = re.compile(r"[a-z]+")
+
+
+def reject_model_numerics(text: str, field_name: str) -> str:
+    """Fail closed on any model-authored quantity: digits, number words,
+    month names. The stated recovery matters: a live model retries on the
+    error text, and a rejection with no way out starves the sweep into the
+    floor."""
+    if any(ch.isdigit() for ch in text):
+        raise ValueError(
+            f"{field_name} must contain no digits; every date, day count, "
+            "and rank is rendered by the system. State the fact without "
+            "the figure and resubmit."
+        )
+    lowered = unicodedata.normalize("NFKC", text).casefold()
+    for token in _WORD_TOKEN.findall(lowered):
+        if token in _NUMBER_WORDS:
+            raise ValueError(
+                f"{field_name} contains the number or date word {token!r}; "
+                "quantities and dates come only from the system's fact "
+                "sheet. State the fact without the figure and resubmit."
+            )
+    return text
+
+
 class ExtractedObservations(BaseModel):
     """Typed observations pulled from free-text intake notes.
 
@@ -335,7 +427,19 @@ class ExtractedObservations(BaseModel):
     @classmethod
     def _ambiguities_are_not_advice(cls, value: list[str]) -> list[str]:
         for item in value:
+            # Ambiguities are copied verbatim into the attorney packet's
+            # fact sheet, so they get the full packet-text discipline: no
+            # advice, no quantities (a question like "could the deadline
+            # instead be <date>?" would plant a fabricated figure inside
+            # the deterministic facts), and a bounded length so no entry
+            # can crowd later ones out of the packet.
+            if len(item) > 160:
+                raise ValueError(
+                    "each ambiguity must be 160 characters or fewer; state "
+                    "one open question per entry"
+                )
             _reject_advice_language(item, "ambiguities")
+            reject_model_numerics(item, "ambiguities")
         return value
 
     @model_validator(mode="after")
