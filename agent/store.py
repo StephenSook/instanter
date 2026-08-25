@@ -53,16 +53,20 @@ class IntakeParseError(ValueError):
 # numeric SEQUENCE. Exactly one of those zones gives letters structural
 # meaning (the division), so exactly one exempts them from folding.
 #
-# The prefix pattern must TOLERATE lookalikes in the year, or a letter
-# there makes the whole match fail and sends the id down the sequence
-# branch, which destroys the division letters and leaves the twin unable
-# to rejoin its own docket. That regression cost nine year-position
-# channels and is why the character class below is not \d.
-_DOCKET_PREFIX = re.compile(r"^[0-9olisbzgq]{2}[a-z]{2}")
+# ONE definition of "letter that can stand in for a digit". The pattern
+# and the fold table are derived from it, because maintaining them as two
+# hand-written lists regressed this function three rounds running: each
+# time the two sets disagreed, ids carrying a letter in the disagreement
+# fell out of the prefix match entirely, lost their division letters to
+# the whole-string fold, and could never rejoin their own docket.
+_CONFUSABLE_LETTERS = "olisbzgqdt"
+_CONFUSABLE_DIGITS = "0115826001"
 # Year and sequence: every lookalike folds. q maps to 0 (the rounded
 # glyph in a numeric field); Q-for-9 is an accepted residual, as is
 # g-for-9, since a fold table gives each letter one target.
-_SEQUENCE_CONFUSABLES = str.maketrans("olisbzgqdt", "0115826001")
+_SEQUENCE_CONFUSABLES = str.maketrans(_CONFUSABLE_LETTERS, _CONFUSABLE_DIGITS)
+# The year tolerates every one of those letters; the division is letters.
+_DOCKET_PREFIX = re.compile(rf"^[0-9{_CONFUSABLE_LETTERS}]{{2}}[a-z]{{2}}")
 
 
 def _parse_date(value: str | None, field_name: str, case_id: str) -> date | None:
@@ -122,6 +126,26 @@ def validate_intake_types(record: IntakeRecord) -> None:
     # run). Fulton docket numbers contain no whitespace; fail closed.
     if any(ch.isspace() for ch in record.case_id):
         raise IntakeParseError(f"case {record.case_id!r}: case_id must contain no whitespace")
+    # A digit typed where a division LETTER belongs ('26E000101' for
+    # '26ED00101') is the one lookalike direction folding cannot fix: the
+    # id is genuinely ambiguous between divisions ED and EO, so folding it
+    # either way would recreate the collision the division exemption
+    # exists to prevent. It is not a valid docket id, and a second
+    # sweeping identity for one docket costs a real case its capacity
+    # slot, so refuse the row instead. Only ids that are docket-shaped
+    # (year-class first pair) with a MIXED letter-and-digit division are
+    # caught: fixture ids and four-digit-year keyings are untouched.
+    squashed_id = "".join(ch for ch in record.case_id if ch.isalnum()).casefold()
+    if len(squashed_id) >= 4 and all(
+        ch.isdigit() or ch in _CONFUSABLE_LETTERS for ch in squashed_id[:2]
+    ):
+        division = squashed_id[2:4]
+        if sum(ch.isdigit() for ch in division) == 1:
+            raise IntakeParseError(
+                f"case {record.case_id!r}: the division must be two letters; "
+                f"{division!r} mixes a digit with a letter, which cannot be "
+                "told apart from the division it imitates"
+            )
     for name in ("answer_filed", "amended_affidavit"):
         if type(getattr(record, name)) is not bool:
             raise IntakeParseError(

@@ -2458,31 +2458,39 @@ def test_real_seed_ids_never_self_contest(tmp_path: Path) -> None:
 # --- Round-22 reproducer ------------------------------------------------------
 
 
-# Every lookalike letter for each digit. The sweep below asserts the
-# identity rule at EVERY position of a docket id, because getting the
-# folded span wrong has now regressed in both directions: exempting the
-# whole prefix left sequence twins uncontested (round 21), and requiring
-# digits in the year left year twins uncontested (round 22).
+# Every lookalike letter for each digit. The sweep asserts the identity
+# rule across the DIGIT SPACE, not against one literal id: parameterizing
+# it over a single base docket let that docket's own digits decide which
+# letters the guard could ever place in the year, and eight of the ten
+# fold letters were never exercised there. Three consecutive regressions
+# in _identity_key hid behind exactly that blind spot.
 _LOOKALIKES = {"0": "oOQqD", "1": "lLiIT", "5": "sS", "8": "bB", "2": "zZ", "6": "gG"}
-_BASE_DOCKET = "26ED00101"
+_DISTINCT_URGENT = "26ED00777"
 
 
-def _positional_twins() -> list[tuple[str, str]]:
-    cases: list[tuple[str, str]] = []
-    for position, char in enumerate(_BASE_DOCKET):
-        if 2 <= position < 4:
-            continue  # the division: letters are structural there
-        for substitute in _LOOKALIKES.get(char, ""):
-            twin = _BASE_DOCKET[:position] + substitute + _BASE_DOCKET[position + 1 :]
-            if twin != _BASE_DOCKET:
-                cases.append((f"pos{position}-{substitute}", twin))
+def _twin_cases() -> list[tuple[str, str, str]]:
+    """(label, docket, twin) for every lookalike letter at every non-division
+    position, over a base docket per year-digit pair."""
+    cases: list[tuple[str, str, str]] = []
+    for first in "0123456789":
+        for second in "0123456789":
+            base = f"{first}{second}ED00101"
+            for position, char in enumerate(base):
+                if 2 <= position < 4:
+                    continue  # the division: letters are structural there
+                for substitute in _LOOKALIKES.get(char, ""):
+                    twin = base[:position] + substitute + base[position + 1 :]
+                    if twin != base:
+                        cases.append((f"{base}-p{position}{substitute}", base, twin))
     return cases
 
 
-@pytest.mark.parametrize(("label", "twin"), _positional_twins())
-def test_every_positional_lookalike_twin_contests(tmp_path: Path, label: str, twin: str) -> None:
-    records, malformed = _load_ids(tmp_path, [_BASE_DOCKET, twin], f"pos-{label}")
-    assert records == (), f"{twin} swept beside {_BASE_DOCKET} ({label})"
+@pytest.mark.parametrize(("label", "docket", "twin"), _twin_cases())
+def test_every_positional_lookalike_twin_contests(
+    tmp_path: Path, label: str, docket: str, twin: str
+) -> None:
+    records, malformed = _load_ids(tmp_path, [docket, twin], "pos")
+    assert records == (), f"{twin} swept beside {docket} ({label})"
     assert malformed
 
 
@@ -2491,7 +2499,66 @@ def test_division_letters_are_never_folded(tmp_path: Path, division: str) -> Non
     """The division is the one zone where a letter is structural: 26ED and
     26EO are different divisions, not a lookalike pair."""
     other = f"26{division}00101"
-    records, malformed = _load_ids(tmp_path, [_BASE_DOCKET, other], f"div-{division}")
+    records, malformed = _load_ids(tmp_path, ["26ED00101", other], f"div-{division}")
+    assert len(records) == 2
+    assert malformed == ()
+
+
+@pytest.mark.parametrize(
+    ("docket", "malformed_division"),
+    [
+        ("26ED00101", "26E000101"),
+        ("26ET00101", "26E100101"),
+        ("26EB00101", "26E800101"),
+        ("26ES00101", "26E500101"),
+        ("26SC00101", "265C00101"),
+        ("26DP00101", "260P00101"),
+        ("26GC00101", "266C00101"),
+    ],
+)
+def test_digit_in_the_division_is_refused_not_swept(
+    tmp_path: Path, docket: str, malformed_division: str
+) -> None:
+    """A digit typed where a division LETTER belongs is the one lookalike
+    direction folding cannot resolve (26E000101 is ambiguous between
+    divisions ED and EO), so it is refused rather than swept as a second
+    identity that costs a real case its capacity slot."""
+    store = JsonFileCaseStore(
+        intake_path=_write_intake(
+            tmp_path,
+            [
+                {
+                    "case_id": case_id,
+                    "jurisdiction_id": "GA-FULTON",
+                    "service_date": "2026-08-30",
+                    "service_method": "personal",
+                }
+                for case_id in (docket, malformed_division, _DISTINCT_URGENT)
+            ],
+        ),
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    ctx = RunContext(
+        run_date=RUN_DATE,
+        attorney_capacity=2,
+        store=store,
+        audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+    )
+    report = run_deterministic(ctx, "approve")
+    assert malformed_division not in report.committed
+    assert malformed_division in report.refused
+    assert _DISTINCT_URGENT in report.committed  # the real case keeps its slot
+    assert not report.succeeded
+
+
+@pytest.mark.parametrize(
+    "fixture_id",
+    ["A-1", "CASE-X", "GOOD-1", "BAD-2", "NC-1", "SC-1", "TYPO-1", "GHOST-1", "2026ED00404"],
+)
+def test_non_docket_shaped_ids_are_not_refused(tmp_path: Path, fixture_id: str) -> None:
+    """The division rule must catch malformed dockets without touching ids
+    that were never docket-shaped, or four-digit-year clinic keyings."""
+    records, malformed = _load_ids(tmp_path, [fixture_id, "26ED00101"], "fixture")
     assert len(records) == 2
     assert malformed == ()
 
