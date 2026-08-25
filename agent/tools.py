@@ -19,7 +19,12 @@ from agent.audit import AuditEvent
 from agent.hooks import presented_content_digest
 from agent.models import LOW_CONFIDENCE_THRESHOLD, EscalationRationale, ExtractedObservations
 from agent.run_context import RunContext
-from agent.store import EscalationRecord, IntakeParseError, to_case_input
+from agent.store import (
+    EscalationRecord,
+    IntakeParseError,
+    to_case_input,
+    validate_intake_types,
+)
 from agent.triage import TriageCase, triage_queue
 from engine.deadline import compute_deadline
 from engine.rules import RULES
@@ -125,9 +130,11 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         for record in ctx.records.values():
             try:
                 # TypeError/ValueError here are data-shaped: a wrongly-typed
-                # field detonates in to_case_input or the frozen engine's
-                # CaseInput validation. All of them become refusals; engine
-                # COMPUTATION errors stay loud (they are programming errors).
+                # field detonates in exact-type validation, to_case_input, or
+                # the frozen engine's CaseInput validation. All of them
+                # become refusals; engine COMPUTATION errors stay loud (they
+                # are programming errors).
+                validate_intake_types(record)
                 case_input = to_case_input(record)
             except (IntakeParseError, TypeError, ValueError) as exc:
                 # One malformed row must never kill the unattended sweep of
@@ -405,12 +412,19 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
             )
 
         def content_key(record: EscalationRecord) -> tuple[Any, ...]:
+            # The FULL record, storage metadata excluded: a same-key row
+            # whose lifecycle already moved (status "deferred", an attorney
+            # note) is NOT this run's pending commit and must conflict, not
+            # satisfy. (Lifecycle transitions become store operations in
+            # the Phase C DynamoDB model; within a run, exact match only.)
             return (
                 record.disposition,
                 record.rank,
                 tuple(record.factors),
                 record.rationale,
                 record.confidence,
+                record.status,
+                record.attorney_note,
             )
 
         stored = {e.case_id: e for e in ctx.store.list_escalations(run_id=ctx.run_id)}

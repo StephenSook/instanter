@@ -53,11 +53,15 @@ class RunReport:
 
     @property
     def succeeded(self) -> bool:
+        # A backstop run delivered the sweep but the model layer did not do
+        # its job: that is a DEGRADED run, and a scheduler must hear about
+        # it even when every escalation landed.
         return (
             not self.failures
             and not self.model_error
             and not self.refused
             and not self.missing_memos
+            and not self.backstop_used
         )
 
 
@@ -269,6 +273,19 @@ def run_live(
                 )
             result = graph(responses)
         graph_status = str(result.status)
+        if result.status != Status.COMPLETED:
+            # A FAILED terminal status is a model-layer death even though
+            # nothing raised; the floor may still bound the damage, but the
+            # run must never read green over it.
+            model_error = f"graph ended with terminal status {result.status}"
+            ctx.audit.append(
+                AuditEvent(
+                    kind="model_error",
+                    case_id=None,
+                    payload={"error": model_error, "phase": "graph_terminal_status"},
+                    run_id=ctx.run_id,
+                )
+            )
     except Exception as exc:
         graph_status = f"RAISED:{type(exc).__name__}"
         model_error = f"{type(exc).__name__}: {exc}"[:400]
@@ -405,19 +422,28 @@ def _report(
     # after the approval that could not ride it is still an undelivered
     # urgent case; it fails the run until a fresh approval resolves it.
     failures: tuple[str, ...] = ()
-    if ctx.attorney_action in ("approved", "pending"):
+    obligation_outstanding = (
+        ctx.attorney_action in ("approved", "pending")
+        # A bound approval is an OBLIGATION: a later response (including the
+        # synthetic single-use deferral on a retry interrupt) never erases
+        # it. If the approved cases are not durably committed, the run
+        # failed, whatever the last recorded action says.
+        or ctx.approved_case_ids is not None
+    )
+    if obligation_outstanding:
         owed: list[str] = []
         if ctx.attorney_action == "approved" and ctx.approved_case_ids is None:
             owed.append("approval-not-bound-to-candidates")
         for case_id in ctx.approved_case_ids or ():
             if case_id not in ctx.committed_case_ids and case_id not in owed:
                 owed.append(case_id)
-        for decision in ctx.interrupt_candidates:
-            if decision.case_id not in ctx.committed_case_ids and decision.case_id not in owed:
-                owed.append(decision.case_id)
+        if ctx.attorney_action in ("approved", "pending"):
+            for decision in ctx.interrupt_candidates:
+                if decision.case_id not in ctx.committed_case_ids and decision.case_id not in owed:
+                    owed.append(decision.case_id)
         failures = tuple(owed)
     missing_memos: tuple[str, ...] = ()
-    if ctx.attorney_action in ("approved", "pending"):
+    if obligation_outstanding:
         missing_memos = tuple(
             case_id for case_id in ctx.committed_case_ids if case_id not in ctx.packet_memos
         )
