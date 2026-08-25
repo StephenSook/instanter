@@ -82,6 +82,16 @@ class RunContext:
             raise ValueError("run_id must be 1-64 characters")
         if any(ch.isspace() or not ch.isprintable() for ch in self.run_id):
             raise ValueError("run_id must be printable with no whitespace")
+        # Capacity zero is a silent no-op sweep: every urgent case demoted
+        # to held, nothing committed, and the run would read green. A
+        # misconfigured scheduler (bad env arithmetic) must fail here, not
+        # deliver perpetual green no-ops over an overdue intake. (The
+        # triage ladder itself still supports capacity 0 for rationing
+        # analysis; a RUN requires at least one attorney slot.)
+        if self.attorney_capacity < 1:
+            raise ValueError(
+                f"attorney_capacity must be >= 1 for a run, got {self.attorney_capacity}"
+            )
 
     @property
     def interrupt_candidates(self) -> list[TriageDecision]:

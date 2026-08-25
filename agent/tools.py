@@ -708,14 +708,33 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 )
             to_write = [d for d in to_write if d.case_id in approved]
         if not to_write:
+            uncommitted = [
+                d.case_id
+                for d in ctx.interrupt_candidates
+                if d.case_id not in ctx.committed_case_ids
+            ]
             ctx.audit.append(
                 AuditEvent(
                     kind="commit_refused",
                     case_id=None,
-                    payload={"reason": "already_committed", "cases": already},
+                    payload={
+                        "reason": "already_committed",
+                        "cases": already,
+                        "uncommitted_outside_approval": uncommitted,
+                    },
                     run_id=ctx.run_id,
                 )
             )
+            if uncommitted:
+                # Tell the caller the truth: the approval's cases are done,
+                # but candidates OUTSIDE the approval remain undelivered
+                # (the report's parity keeps the run red until a fresh
+                # approval resolves them).
+                return (
+                    "COMMITTED WITHIN APPROVAL: every escalation the attorney "
+                    f"approved is durably recorded; {', '.join(uncommitted)} "
+                    "remain uncommitted and require a fresh attorney approval."
+                )
             return (
                 "ALREADY COMMITTED: every interrupt-now escalation is already "
                 "durably recorded this run; do not call commit_escalations again."

@@ -84,6 +84,18 @@ def validate_intake_types(record: IntakeRecord) -> None:
         raise IntakeParseError(
             f"case {record.case_id!r}: case_id must contain only printable characters"
         )
+    # ASCII only: a homoglyph twin ('26ED00101' with a Cyrillic capital
+    # Ie in place of the E) passes every visual inspection, dodges
+    # exact-codepoint duplicate detection,
+    # and can occupy a capacity slot a genuinely distinct urgent case
+    # needed. Fulton docket numbers are ASCII; anything else fails closed
+    # (the same posture the model-text floor takes with mixed scripts).
+    if not record.case_id.isascii():
+        raise IntakeParseError(
+            f"case {record.case_id!r}: case_id must contain only ASCII "
+            "characters (a lookalike character cannot be distinguished "
+            "from the docket id it imitates)"
+        )
     # Whitespace padding creates visually duplicate docket identities
     # ('26ED00101' vs '26ED00101 ') that dodge duplicate detection, hold
     # separate capacity slots, and confuse every downstream key.
@@ -260,23 +272,35 @@ class JsonFileCaseStore:
                 )
                 continue
             records.append(record)
+
         # Duplicate ids: identity is ambiguous for EVERY row carrying the
         # id, constructible or not, so all of them are refused and none is
-        # swept; the rest of the intake still processes.
+        # swept; the rest of the intake still processes. Counting keys on a
+        # NORMALIZED shadow (stripped, casefolded), so a padded or
+        # case-variant sibling ('26ED00101 ', '26ed00101') contests the
+        # identity instead of leaving its stale twin sweeping alone.
+        def _identity_key(case_id: str) -> str:
+            return case_id.strip().casefold()
+
         counts: dict[str, int] = {}
+        first_seen: dict[str, str] = {}
         for case_id in [r.case_id for r in records] + malformed_real_ids:
-            counts[case_id] = counts.get(case_id, 0) + 1
-        duplicated = {case_id for case_id, count in counts.items() if count > 1}
+            key = _identity_key(case_id)
+            counts[key] = counts.get(key, 0) + 1
+            first_seen.setdefault(key, case_id)
+        duplicated = {key for key, count in counts.items() if count > 1}
         if duplicated:
-            for case_id in sorted(duplicated):
+            for key in sorted(duplicated):
+                original = first_seen[key]
                 malformed.append(
                     MalformedIntakeRow(
-                        case_id,
-                        f"case_id {case_id!r} appears more than once in the intake; "
+                        original,
+                        f"case_id {original!r} appears more than once in the intake "
+                        "(padded, case-variant, or malformed siblings included); "
                         "identity is ambiguous and every row carrying it is refused",
                     )
                 )
-            records = [r for r in records if r.case_id not in duplicated]
+            records = [r for r in records if _identity_key(r.case_id) not in duplicated]
         if not records and not malformed:
             raise IntakeParseError("intake file contains zero records")
         return IntakeLoadResult(records=tuple(records), malformed=tuple(malformed))
