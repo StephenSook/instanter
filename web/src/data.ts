@@ -148,3 +148,97 @@ export async function loadStats(): Promise<Stats> {
   }
   return (await response.json()) as Stats;
 }
+
+/* ---------------------------------------------------------------- runs ---
+ * The door's run endpoints. A run is two HTTP calls with a human in between:
+ * start it, then answer the attorney interrupt it stops at.
+ */
+
+export interface AwaitingCase {
+  case_id: string;
+  rank: number;
+  days_remaining: number | null;
+  factors: string[];
+  flags: string[];
+  rationale: string | null;
+}
+
+export interface RunResult {
+  interrupted: boolean;
+  status?: string;
+  interrupts?: { id: string; name: string | null; reason: unknown }[];
+  awaiting?: AwaitingCase[];
+  total_cases?: number;
+  attorney_action?: string;
+  committed?: string[];
+  failures?: string[];
+  refused?: string[];
+  missing_memos?: string[];
+  backstop_used?: boolean;
+  model_error?: string;
+  succeeded?: boolean;
+}
+
+export interface RunEnvelope {
+  run_id: string;
+  status: string;
+  result?: RunResult;
+}
+
+/** Raised with the door's own words so the UI can render the real reason.
+ *
+ *  Fields are declared and assigned rather than written as constructor
+ *  parameter properties: this project builds with `erasableSyntaxOnly`, which
+ *  forbids TypeScript syntax that has to survive into emitted JavaScript.
+ */
+export class DoorError extends Error {
+  status: number;
+  body: Record<string, unknown> | null;
+
+  constructor(message: string, status: number, body: Record<string, unknown> | null) {
+    super(message);
+    this.name = "DoorError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
+async function send(path: string, body?: unknown): Promise<RunEnvelope> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+    cache: "no-store",
+  });
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    parsed = (await response.json()) as Record<string, unknown>;
+  } catch {
+    parsed = null;
+  }
+  if (!response.ok) {
+    // The door explains itself (a spend cap, an unconfigured runtime). Carry
+    // its words up rather than replacing them with a generic failure.
+    const detail =
+      (parsed?.detail as string) || (parsed?.error as string) || `HTTP ${response.status}`;
+    throw new DoorError(detail, response.status, parsed);
+  }
+  return parsed as unknown as RunEnvelope;
+}
+
+export function startRun(capacity = 2): Promise<RunEnvelope> {
+  return send("/api/run", { capacity });
+}
+
+export function decideRun(runId: string, answer: string): Promise<RunEnvelope> {
+  return send(`/api/run/${encodeURIComponent(runId)}/decision`, { response: answer });
+}
+
+/** How the run actually ended, in the attorney's terms rather than HTTP's. */
+export type Outcome = "committed" | "deferred" | "unresolved";
+
+export function outcomeOf(result: RunResult): Outcome {
+  if (result.succeeded === false) return "unresolved";
+  if ((result.committed?.length ?? 0) > 0) return "committed";
+  return "deferred";
+}

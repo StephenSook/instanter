@@ -3,6 +3,7 @@ import Lenis from "lenis";
 import gsap from "gsap";
 import { Cabinet } from "./components/Cabinet";
 import { LiveProof } from "./components/LiveProof";
+import { RunPanel } from "./components/RunPanel";
 import { Packet } from "./components/Packet";
 import { loadQueue, type QueueSnapshot } from "./data";
 
@@ -79,8 +80,17 @@ export default function App() {
           </div>
         )}
 
+        {/* The run panel depends on nothing that loads, so it is painted
+            first and never moves. Order matters here: while the placeholder
+            sat ABOVE it, the panel jumped a full screen upwards the moment
+            the snapshot arrived and the placeholder was removed. */}
+        {route.name === "cabinet" && <RunPanel />}
+
+        {/* The placeholder stands exactly where the queue will go, and
+            reserves a screen so the footer stays below the fold in both
+            states rather than jumping up the page and back down. */}
         {!snapshot && !error && (
-          <div className="mx-auto max-w-3xl px-5 py-24">
+          <div className="mx-auto min-h-screen max-w-3xl px-5 py-24">
             <p className="font-mono text-[0.7rem] tracking-[0.2em] text-white/60 uppercase">
               Opening the cabinet
             </p>
