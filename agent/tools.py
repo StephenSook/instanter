@@ -342,6 +342,23 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
         already = [d.case_id for d in ctx.interrupt_candidates if d.case_id in durable]
         ctx.committed_case_ids = tuple(already)
         to_write = [d for d in ctx.interrupt_candidates if d.case_id not in durable]
+        # Approval binding: once an attorney has approved, ONLY the cases in
+        # the approval snapshot may be committed under it. Anything the
+        # queue has since minted needs a fresh interrupt, never a ride on an
+        # old approval.
+        if ctx.attorney_action == "approved" and ctx.approved_case_ids is not None:
+            approved = set(ctx.approved_case_ids)
+            outside = [d.case_id for d in to_write if d.case_id not in approved]
+            if outside:
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="commit_refused",
+                        case_id=None,
+                        payload={"reason": "requires_new_approval", "cases": outside},
+                        run_id=ctx.run_id,
+                    )
+                )
+            to_write = [d for d in to_write if d.case_id in approved]
         if not to_write:
             ctx.audit.append(
                 AuditEvent(

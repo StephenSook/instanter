@@ -39,6 +39,11 @@ class RunContext:
     packet_memos: dict[str, str] = field(default_factory=dict)
     committed_case_ids: tuple[str, ...] = ()
     attorney_action: str = ""  # "approved" | "deferred" | "" before review
+    # Immutable snapshot of exactly what the attorney approved: the case ids
+    # presented at the interrupt. Approval binds to THESE cases; nothing
+    # outside the snapshot may ever be committed under that approval, and a
+    # changed queue requires a fresh interrupt.
+    approved_case_ids: tuple[str, ...] | None = None
     # Single-use lifecycle: a context that already carried a run must never
     # carry another. Reuse would replay stale decisions and committed ids
     # under the same run_id; the runner enforces this at entry.

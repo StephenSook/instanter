@@ -8,6 +8,7 @@ without the human.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent, HookProvider, HookRegistry
@@ -51,6 +52,47 @@ class AttorneyApprovalHook(HookProvider):
     def _approve(self, event: BeforeToolCallEvent) -> None:
         if event.tool_use["name"] != _GATED_TOOL:
             return
+        # Preconditions BEFORE the attorney is interrupted: an approval must
+        # bind to a complete, nonempty candidate set. An empty queue or a
+        # missing rationale cancels the tool instead of asking a human to
+        # approve something unpresentable (which would leave a recorded
+        # approval bound to nothing).
+        if not self._ctx.interrupt_candidates:
+            self._ctx.audit.append(
+                AuditEvent(
+                    kind="commit_refused",
+                    case_id=None,
+                    payload={"reason": "no_candidates_at_interrupt"},
+                    run_id=self._ctx.run_id,
+                )
+            )
+            event.cancel_tool = (
+                "NOTHING TO APPROVE: no interrupt-now cases exist; do not "
+                "call commit_escalations on an empty queue."
+            )
+            return
+        unrationalized = [
+            d.case_id
+            for d in self._ctx.interrupt_candidates
+            if d.case_id not in self._ctx.rationales
+        ]
+        if unrationalized:
+            self._ctx.audit.append(
+                AuditEvent(
+                    kind="commit_refused",
+                    case_id=None,
+                    payload={
+                        "reason": "missing_rationales_at_interrupt",
+                        "cases": unrationalized,
+                    },
+                    run_id=self._ctx.run_id,
+                )
+            )
+            event.cancel_tool = (
+                "MISSING RATIONALES: submit_escalation_rationale first for: "
+                + ", ".join(unrationalized)
+            )
+            return
         candidates = [
             {
                 "case_id": d.case_id,
@@ -81,11 +123,29 @@ class AttorneyApprovalHook(HookProvider):
         action, reason = parse_attorney_response(response)
         detail = str(response).strip()
         self._ctx.attorney_action = action
+        payload: dict[str, Any] = {
+            "action": action,
+            "detail": detail[:400],
+            "reason": reason,
+        }
+        if action == "approved":
+            # Bind the approval to exactly what was presented: the case ids
+            # and a digest of the rationale texts the attorney saw.
+            snapshot = tuple(d.case_id for d in self._ctx.interrupt_candidates)
+            self._ctx.approved_case_ids = snapshot
+            digest = hashlib.sha256()
+            for case_id in sorted(snapshot):
+                digest.update(case_id.encode())
+                digest.update(b"\x00")
+                digest.update(self._ctx.rationales[case_id].rationale.encode())
+                digest.update(b"\x00")
+            payload["approved_cases"] = list(snapshot)
+            payload["rationale_digest"] = digest.hexdigest()
         self._ctx.audit.append(
             AuditEvent(
                 kind="attorney_decision",
                 case_id=None,
-                payload={"action": action, "detail": detail[:400], "reason": reason},
+                payload=payload,
                 run_id=self._ctx.run_id,
             )
         )
