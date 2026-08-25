@@ -37,6 +37,16 @@ class RunReport:
     attorney_action: str
     audit_path: str
     backstop_used: bool = False
+    model_error: str = ""
+    # Interrupt-now cases the attorney approved that are NOT durably
+    # committed. An attorney decision is a decision, never proof the commit
+    # succeeded; parity between these two sets is the run's success
+    # criterion, and main() exits non-zero when it does not hold.
+    failures: tuple[str, ...] = ()
+
+    @property
+    def succeeded(self) -> bool:
+        return not self.failures and not self.model_error
 
 
 def _load_records(ctx: RunContext) -> None:
@@ -125,27 +135,47 @@ def run_live(
 
     _load_records(ctx)
     graph = build_triage_graph(ctx, plugins=plugins)
-    result = graph(
-        "Run the unattended triage sweep for this intake queue: analyze "
-        "notes, rank deterministically, escalate through attorney approval."
-    )
-    while result.status == Status.INTERRUPTED:
-        responses: list[InterruptResponseContent] = [
-            {
-                "interruptResponse": {
-                    "interruptId": interrupt.id,
-                    "response": attorney_response,
+
+    # Failure boundary: Strands re-raises node exceptions and node timeouts
+    # (fail-fast by design), so without this boundary a Bedrock outage or a
+    # 300s node timeout would exit run_live before the deterministic floor
+    # ever ran. The model layer's death is audited, then the floor runs.
+    graph_status = "NOT_RUN"
+    model_error = ""
+    try:
+        result = graph(
+            "Run the unattended triage sweep for this intake queue: analyze "
+            "notes, rank deterministically, escalate through attorney approval."
+        )
+        while result.status == Status.INTERRUPTED:
+            responses: list[InterruptResponseContent] = [
+                {
+                    "interruptResponse": {
+                        "interruptId": interrupt.id,
+                        "response": attorney_response,
+                    }
                 }
-            }
-            for interrupt in result.interrupts
-        ]
-        result = graph(responses)
+                for interrupt in result.interrupts
+            ]
+            result = graph(responses)
+        graph_status = str(result.status)
+    except Exception as exc:
+        graph_status = f"RAISED:{type(exc).__name__}"
+        model_error = f"{type(exc).__name__}: {exc}"[:400]
+        ctx.audit.append(
+            AuditEvent(
+                kind="model_error",
+                case_id=None,
+                payload={"error": model_error, "phase": "graph"},
+                run_id=ctx.run_id,
+            )
+        )
 
     # Deterministic floor: chaos testing showed the model layer can end a
-    # run without ever reaching the attorney (a node dies, or the writer
-    # declines to act when upstream context is degraded). Undertriage is
-    # the catastrophic error, so if no attorney decision was recorded, the
-    # runner itself completes the sweep deterministically, loudly audited.
+    # run without ever reaching the attorney (a node dies, the writer
+    # declines to act on degraded context, or the graph raises). Undertriage
+    # is the catastrophic error, so if no attorney decision was recorded,
+    # the runner itself completes the sweep deterministically, audited.
     backstop_used = False
     if not ctx.attorney_action:
         tools = build_tools(ctx)
@@ -156,7 +186,7 @@ def run_live(
                     kind="deterministic_backstop",
                     case_id=None,
                     payload={
-                        "graph_status": str(result.status),
+                        "graph_status": graph_status,
                         "had_ranked_queue": bool(ctx.decisions),
                         "reason": (
                             "model layer ended the run without an attorney "
@@ -168,15 +198,21 @@ def run_live(
             )
             _deterministic_floor(ctx, tools, attorney_response)
 
+    report = _report(ctx, mode="live", backstop_used=backstop_used, model_error=model_error)
     ctx.audit.append(
         AuditEvent(
             kind="run_finished",
             case_id=None,
-            payload={"status": str(result.status), "backstop_used": backstop_used},
+            payload={
+                "status": graph_status,
+                "backstop_used": backstop_used,
+                "failures": list(report.failures),
+                "model_error": model_error,
+            },
             run_id=ctx.run_id,
         )
     )
-    return _report(ctx, mode="live", backstop_used=backstop_used)
+    return report
 
 
 def _template_rationale(decision: TriageDecision) -> EscalationRationale:
@@ -192,7 +228,16 @@ def _template_rationale(decision: TriageDecision) -> EscalationRationale:
     )
 
 
-def _report(ctx: RunContext, mode: str, backstop_used: bool = False) -> RunReport:
+def _report(
+    ctx: RunContext, mode: str, backstop_used: bool = False, model_error: str = ""
+) -> RunReport:
+    # Parity check: an approved decision whose commit did not durably land
+    # for every interrupt-now case is a FAILED run, whatever else happened.
+    failures: tuple[str, ...] = ()
+    if ctx.attorney_action == "approved":
+        failures = tuple(
+            d.case_id for d in ctx.interrupt_candidates if d.case_id not in ctx.committed_case_ids
+        )
     return RunReport(
         run_id=ctx.run_id,
         mode=mode,
@@ -202,6 +247,8 @@ def _report(ctx: RunContext, mode: str, backstop_used: bool = False) -> RunRepor
         attorney_action=ctx.attorney_action,
         audit_path="",
         backstop_used=backstop_used,
+        model_error=model_error,
+        failures=failures,
     )
 
 
@@ -250,10 +297,18 @@ def main() -> None:
                 "committed": list(report.committed),
                 "attorney_action": report.attorney_action,
                 "backstop_used": report.backstop_used,
+                "model_error": report.model_error,
+                "failures": list(report.failures),
+                "succeeded": report.succeeded,
             },
             indent=2,
         )
     )
+    # A scheduler must never see green on a run that lost an escalation or
+    # a model layer; the floor completing the sweep does not un-fail the
+    # run, it bounds the damage.
+    if not report.succeeded:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -183,6 +183,11 @@ def test_deterministic_run_surfaces_store_failure(tmp_path: Path) -> None:
     assert len(report.committed) == 1
     assert "store_write_failed" in audit_kinds(ctx)
     assert "escalation_committed" not in audit_kinds(ctx)
+    # The attorney approved 2; 1 landed. The run must report the missing
+    # case as a failure and refuse to call itself a success.
+    assert len(report.failures) == 1
+    assert report.failures[0] not in report.committed
+    assert not report.succeeded
 
 
 # --- The deterministic floor: undertriage must be impossible ------------------
@@ -250,6 +255,48 @@ def test_floor_makes_no_attorney_decision_without_candidates(tmp_path: Path) -> 
     assert ctx.attorney_action == ""
     assert ctx.committed_case_ids == ()
     assert "queue_ranked" in audit_kinds(ctx)
+
+
+# --- A raising graph must not skip the floor ----------------------------------
+
+
+def test_graph_exception_still_runs_floor_and_reports_model_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Strands re-raises node failures and node timeouts (fail-fast). The
+    runner's failure boundary must audit the death and still complete the
+    deterministic sweep, then refuse to call the run a success."""
+    import agent.graph as graph_module
+    from agent.runner import run_live
+
+    class ExplodingGraph:
+        def __call__(self, _prompt: object) -> object:
+            raise RuntimeError("simulated Bedrock outage")
+
+    monkeypatch.setattr(
+        graph_module, "build_triage_graph", lambda ctx, plugins=None: ExplodingGraph()
+    )
+
+    store = JsonFileCaseStore(
+        intake_path=SEED,
+        escalations_path=tmp_path / "escalations.jsonl",
+    )
+    ctx = RunContext(
+        run_date=RUN_DATE,
+        attorney_capacity=2,
+        store=store,
+        audit=JsonlAuditSink(tmp_path / "audit.jsonl"),
+    )
+    report = run_live(ctx, attorney_response="approve")
+
+    assert report.backstop_used
+    assert "simulated Bedrock outage" in report.model_error
+    assert len(report.committed) == 2  # the sweep still delivered
+    assert not report.succeeded  # but the run is not allowed to read green
+    kinds = audit_kinds(ctx)
+    assert "model_error" in kinds
+    assert "deterministic_backstop" in kinds
+    assert "escalation_committed" in kinds
 
 
 # --- Corrupt intake must fail loudly before anything runs ---------------------
