@@ -58,7 +58,7 @@ def main() -> None:
         report = run_live(ctx, attorney_response="approve")
         if report.model_error:
             raise RuntimeError(report.model_error)
-    except Exception as exc:  # noqa: BLE001 - any live failure degrades to deterministic
+    except Exception as exc:
         print(f"live sweep unavailable ({str(exc)[:120]}); using the deterministic path")
         mode = "deterministic"
         ctx = RunContext(
@@ -144,9 +144,7 @@ def main() -> None:
         "report": {k: v for k, v in asdict(report).items()},
         "succeeded": report.succeeded,
         "cases": cases,
-        "audit": [
-            {"seq": e["seq"], "kind": e["kind"], "case_id": e["case_id"]} for e in audit
-        ],
+        "audit": [{"seq": e["seq"], "kind": e["kind"], "case_id": e["case_id"]} for e in audit],
         "counts": {
             "total": len(cases),
             "interrupt": sum(1 for c in cases if c["level"] == "interrupt"),
