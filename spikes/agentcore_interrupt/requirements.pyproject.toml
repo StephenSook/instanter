@@ -1,0 +1,10 @@
+[project]
+name = "agentcore-interrupt-spike"
+version = "0.1.0"
+description = "Spike: does a Strands Graph interrupt survive AgentCore Runtime?"
+requires-python = ">=3.12"
+dependencies = [
+    "bedrock-agentcore>=0.1.0",
+    "strands-agents>=1.53.0",
+    "boto3>=1.40.0",
+]
