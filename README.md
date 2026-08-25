@@ -37,6 +37,17 @@ Three answers, three different outcomes, and the third is the one worth trying:
 
 Live runs are capped per day, because this endpoint spends money on a model. `/api/stats` is pure arithmetic and is never capped.
 
+### On a phone
+
+The mobile app is the **attorney's decision surface**, not a second console. It exists for the escalation that fires while the one person allowed to decide is in a hallway at the courthouse. Same public door, no second backend.
+
+| | |
+|---|---|
+| **Android** | [`instanter.apk`](https://github.com/StephenSook/instanter/releases/latest) on the latest release. Signed with our own release key, so Android will ask you to allow the install |
+| **iOS** | <https://testflight.apple.com/join/JqZ1wX25> (public TestFlight link) |
+
+The APK is a release asset rather than a build-service URL on purpose: build-service links expire in days while the repo, CI and deployment all stay green, so the download rots while every check still reports success.
+
 ## Status
 
 Under active build for the Agents for Humans Hackathon (submission window Aug 10 to Sep 14, 2026). This README grows with the code; nothing is claimed here before it ships.
