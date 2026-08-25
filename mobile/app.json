@@ -11,7 +11,8 @@
       "bundleIdentifier": "com.stephensookra.instanter",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "appleTeamId": "Y8XVCMLQCZ"
     },
     "android": {
       "package": "com.stephensookra.instanter",
