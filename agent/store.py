@@ -62,6 +62,29 @@ def _parse_date(value: str | None, field_name: str, case_id: str) -> date | None
         ) from exc
 
 
+def validate_intake_types(record: IntakeRecord) -> None:
+    """Exact-type validation for the fields the triage layer consumes
+    directly (IntakeRecord is a plain dataclass; raw JSON reaches it with
+    no runtime checks). A JSON string "false" in answer_filed is truthy and
+    would silently HOLD an urgent case, which is the worst possible
+    direction to fail; refuse instead."""
+    for name in ("case_id", "jurisdiction_id", "service_method"):
+        if type(getattr(record, name)) is not str:
+            raise IntakeParseError(
+                f"case {record.case_id!r}: {name} must be a string, got {getattr(record, name)!r}"
+            )
+    for name in ("answer_filed", "amended_affidavit"):
+        if type(getattr(record, name)) is not bool:
+            raise IntakeParseError(
+                f"case {record.case_id}: {name} must be a JSON boolean, "
+                f"got {getattr(record, name)!r}"
+            )
+    if type(record.notes) is not str:
+        raise IntakeParseError(
+            f"case {record.case_id}: notes must be a string, got {record.notes!r}"
+        )
+
+
 def to_case_input(record: IntakeRecord) -> CaseInput:
     """Boundary conversion; raises IntakeParseError instead of guessing."""
     try:

@@ -851,6 +851,124 @@ def test_second_interrupt_gets_deferred_not_replayed(
     assert answers[1].startswith("defer: the single-use attorney response")
 
 
+def test_wrongly_typed_answer_filed_refuses_instead_of_holding(tmp_path: Path) -> None:
+    """Round-6 reproducer: a JSON string "false" in answer_filed is truthy,
+    which would silently HOLD an overdue case: the worst possible failure
+    direction. Exact-type validation must refuse the row instead."""
+    ctx = make_ctx(
+        tmp_path,
+        [
+            good_record("GOOD-1", service_date="2026-08-30"),
+            IntakeRecord(
+                case_id="BAD-5",
+                jurisdiction_id="GA-FULTON",
+                service_date="2026-08-30",  # overdue: would be L1 interrupt
+                service_method="personal",
+                answer_filed="false",  # type: ignore[arg-type]
+            ),
+        ],
+    )
+    tools = build_tools(ctx)
+    payload = json.loads(tools["get_ranked_queue"]())
+    assert {row["case_id"] for row in payload["queue"]} == {"GOOD-1"}
+    assert payload["refused_cases"][0]["case_id"] == "BAD-5"
+    assert "JSON boolean" in payload["refused_cases"][0]["reason"]
+    assert "BAD-5" in ctx.refused_cases  # reaches the report and fails the run
+
+
+def test_approval_obligation_survives_a_later_deferral(tmp_path: Path) -> None:
+    """Round-6 reproducer: a bound approval whose commit never landed is an
+    outstanding obligation. A later deferral (the synthetic single-use
+    answer on a retry interrupt) must not erase it into a green run."""
+    from agent.runner import _report
+
+    ctx = make_ctx(tmp_path, [good_record("A-1", service_date="2026-08-30")], capacity=1)
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    decision = ctx.interrupt_candidates[0]
+    tools["submit_escalation_rationale"](
+        case_id=decision.case_id,
+        disposition=decision.level.value,
+        contributing_factors=list(decision.factors)[:8],
+        rationale="Deadline has passed with no answer on file.",
+        confidence=0.9,
+    )
+    bind_approval(ctx, ("A-1",))  # the human approved...
+    ctx.attorney_action = "deferred"  # ...then a retry interrupt auto-deferred
+    report = _report(ctx, mode="test")
+    assert "A-1" in report.failures  # the obligation is not erased
+    assert not report.succeeded
+
+
+def test_failed_graph_status_is_a_model_error_even_without_a_raise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round-6 reproducer: Strands can return Status.FAILED without
+    raising. The floor bounds the damage, but the run must not read green."""
+    from strands.multiagent import Status
+
+    import agent.graph as graph_module
+    from agent.runner import run_live
+
+    class FailedResult:
+        def __init__(self) -> None:
+            self.status = Status.FAILED
+            self.interrupts: list[object] = []
+
+    monkeypatch.setattr(
+        graph_module,
+        "build_triage_graph",
+        lambda ctx, plugins=None: lambda _payload: FailedResult(),
+    )
+    ctx = seed_ctx(tmp_path)
+    report = run_live(ctx, attorney_response="approve")
+    assert report.backstop_used
+    assert report.attorney_action == "pending"
+    assert len(report.committed) == 2  # the sweep still delivered
+    assert "terminal status" in report.model_error
+    assert not report.succeeded
+
+
+def test_deferred_durable_row_does_not_satisfy_a_commit(tmp_path: Path) -> None:
+    """Round-6 reproducer: a same-key row whose lifecycle already moved
+    (status deferred, an attorney note) is NOT this run's pending commit."""
+    from agent.runner import _report
+
+    ctx = make_ctx(tmp_path, [good_record("A-1", service_date="2026-08-30")], capacity=1)
+    tools = build_tools(ctx)
+    tools["get_ranked_queue"]()
+    decision = ctx.interrupt_candidates[0]
+    tools["submit_escalation_rationale"](
+        case_id=decision.case_id,
+        disposition=decision.level.value,
+        contributing_factors=list(decision.factors)[:8],
+        rationale="Deadline has passed with no answer on file.",
+        confidence=0.9,
+    )
+    rationale = ctx.rationales["A-1"]
+    ctx.store.record_escalation(
+        EscalationRecord(
+            case_id="A-1",
+            disposition=decision.level.value,
+            rank=decision.rank,
+            factors=decision.factors,
+            rationale=rationale.rationale,
+            confidence=rationale.confidence,
+            run_id=ctx.run_id,
+            status="deferred",  # lifecycle already moved
+            attorney_note="do not proceed",
+        )
+    )
+    ctx.attorney_action = "approved"
+    bind_approval(ctx, ("A-1",))
+    result = tools["commit_escalations"]()
+    assert "STORE CONFLICT" in result
+    assert ctx.committed_case_ids == ()
+    report = _report(ctx, mode="test")
+    assert "A-1" in report.failures
+    assert not report.succeeded
+
+
 def test_overlapping_audit_sinks_never_share_a_sequence(tmp_path: Path) -> None:
     from agent.audit import AuditEvent
 
