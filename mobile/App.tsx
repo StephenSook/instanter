@@ -3,13 +3,18 @@ import {
   ActivityIndicator,
   Linking,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+// React Native's own SafeAreaView is iOS-only and a silent no-op on Android, so
+// the wordmark drew straight through the status bar clock and the kicker ran
+// through the wifi and battery icons. Android 15 forces edge-to-edge for
+// targetSdk 35 and above, which means the insets have to be applied by the app.
+// This package is the one that reports them on both platforms.
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import Constants from "expo-constants";
 
 /**
@@ -108,104 +113,106 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={s.safe}>
-      <StatusBar barStyle="light-content" />
-      <View style={s.header}>
-        <Text style={s.wordmark}>INSTANTER</Text>
-        <Text style={s.kicker}>ATTORNEY REVIEW</Text>
-      </View>
+    <SafeAreaProvider>
+      <SafeAreaView style={s.safe} edges={["top", "bottom", "left", "right"]}>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+        <View style={s.header}>
+          <Text style={s.wordmark}>INSTANTER</Text>
+          <Text style={s.kicker}>ATTORNEY REVIEW</Text>
+        </View>
 
-      <ScrollView contentContainerStyle={s.scroll}>
-        {screen.k === "idle" && (
-          <View>
-            <Text style={s.h1}>The morning queue</Text>
-            <Text style={s.body}>
-              Every case is read, every answer deadline is computed from the statute, and the
-              queue is ranked by how close it is to a default writ. Then it stops and asks you.
-            </Text>
-            <Pressable style={s.primary} onPress={sweep} accessibilityRole="button">
-              <Text style={s.primaryText}>SWEEP THE QUEUE</Text>
-            </Pressable>
-            <Text style={s.fine}>
-              Case records are synthetic and labelled as such. The statute, the court calendar,
-              and every computation are real.
-            </Text>
-            <Text
-              style={s.link}
-              accessibilityRole="link"
-              onPress={() => Linking.openURL(`${DOOR}/privacy.html`)}
-            >
-              Privacy policy
-            </Text>
-          </View>
-        )}
+        <ScrollView contentContainerStyle={s.scroll}>
+          {screen.k === "idle" && (
+            <View>
+              <Text style={s.h1}>The morning queue</Text>
+              <Text style={s.body}>
+                Every case is read, every answer deadline is computed from the statute, and the
+                queue is ranked by how close it is to a default writ. Then it stops and asks you.
+              </Text>
+              <Pressable style={s.primary} onPress={sweep} accessibilityRole="button">
+                <Text style={s.primaryText}>SWEEP THE QUEUE</Text>
+              </Pressable>
+              <Text style={s.fine}>
+                Case records are synthetic and labelled as such. The statute, the court calendar,
+                and every computation are real.
+              </Text>
+              <Text
+                style={s.link}
+                accessibilityRole="link"
+                onPress={() => Linking.openURL(`${DOOR}/privacy.html`)}
+              >
+                Privacy policy
+              </Text>
+            </View>
+          )}
 
-        {screen.k === "working" && (
-          <View style={s.center}>
-            <ActivityIndicator size="large" color="#c2352b" />
-            <Text style={[s.body, s.centerText]}>{screen.note}</Text>
-          </View>
-        )}
+          {screen.k === "working" && (
+            <View style={s.center}>
+              <ActivityIndicator size="large" color="#c2352b" />
+              <Text style={[s.body, s.centerText]}>{screen.note}</Text>
+            </View>
+          )}
 
-        {screen.k === "awaiting" && (
-          <View>
-            <Text style={s.kickerRed}>STOPPED FOR YOU</Text>
-            <Text style={s.h1}>
-              {screen.result.awaiting?.length ?? 0} case
-              {(screen.result.awaiting?.length ?? 0) === 1 ? "" : "s"} need a decision
-            </Text>
-            <Text style={s.fine}>
-              {screen.result.total_cases} swept. Nothing is committed until you answer.
-            </Text>
+          {screen.k === "awaiting" && (
+            <View>
+              <Text style={s.kickerRed}>STOPPED FOR YOU</Text>
+              <Text style={s.h1}>
+                {screen.result.awaiting?.length ?? 0} case
+                {(screen.result.awaiting?.length ?? 0) === 1 ? "" : "s"} need a decision
+              </Text>
+              <Text style={s.fine}>
+                {screen.result.total_cases} swept. Nothing is committed until you answer.
+              </Text>
 
-            {(screen.result.awaiting ?? []).map((c) => (
-              <View key={c.case_id} style={s.card}>
-                <View style={s.cardTop}>
-                  <Text style={s.caseId}>{c.case_id}</Text>
-                  <Text
-                    style={[
-                      s.countdown,
-                      (c.days_remaining ?? 0) < 0 ? s.countdownUrgent : undefined,
-                    ]}
-                  >
-                    RANK {c.rank} · {countdown(c.days_remaining).toUpperCase()}
-                  </Text>
+              {(screen.result.awaiting ?? []).map((c) => (
+                <View key={c.case_id} style={s.card}>
+                  <View style={s.cardTop}>
+                    <Text style={s.caseId}>{c.case_id}</Text>
+                    <Text
+                      style={[
+                        s.countdown,
+                        (c.days_remaining ?? 0) < 0 ? s.countdownUrgent : undefined,
+                      ]}
+                    >
+                      RANK {c.rank} · {countdown(c.days_remaining).toUpperCase()}
+                    </Text>
+                  </View>
+                  {c.rationale ? <Text style={s.rationale}>{c.rationale}</Text> : null}
                 </View>
-                {c.rationale ? <Text style={s.rationale}>{c.rationale}</Text> : null}
-              </View>
-            ))}
+              ))}
 
-            <Pressable
-              style={s.approve}
-              onPress={() => decide(screen.runId, "approve")}
-              accessibilityRole="button"
-            >
-              <Text style={s.approveText}>APPROVE</Text>
-            </Pressable>
-            <Pressable
-              style={s.defer}
-              onPress={() => decide(screen.runId, "defer: reviewing at the office")}
-              accessibilityRole="button"
-            >
-              <Text style={s.deferText}>DEFER</Text>
-            </Pressable>
-          </View>
-        )}
+              <Pressable
+                style={s.approve}
+                onPress={() => decide(screen.runId, "approve")}
+                accessibilityRole="button"
+              >
+                <Text style={s.approveText}>APPROVE</Text>
+              </Pressable>
+              <Pressable
+                style={s.defer}
+                onPress={() => decide(screen.runId, "defer: reviewing at the office")}
+                accessibilityRole="button"
+              >
+                <Text style={s.deferText}>DEFER</Text>
+              </Pressable>
+            </View>
+          )}
 
-        {screen.k === "done" && <Done result={screen.result} onAgain={() => setScreen({ k: "idle" })} />}
+          {screen.k === "done" && <Done result={screen.result} onAgain={() => setScreen({ k: "idle" })} />}
 
-        {screen.k === "failed" && (
-          <View>
-            <Text style={s.kickerRed}>THE RUN DID NOT COMPLETE</Text>
-            <Text style={s.body}>{screen.message}</Text>
-            <Text style={s.fine}>Nothing is shown here that the door did not return.</Text>
-            <Pressable style={s.primary} onPress={() => setScreen({ k: "idle" })}>
-              <Text style={s.primaryText}>START OVER</Text>
-            </Pressable>
-          </View>
-        )}
-      </ScrollView>
-    </SafeAreaView>
+          {screen.k === "failed" && (
+            <View>
+              <Text style={s.kickerRed}>THE RUN DID NOT COMPLETE</Text>
+              <Text style={s.body}>{screen.message}</Text>
+              <Text style={s.fine}>Nothing is shown here that the door did not return.</Text>
+              <Pressable style={s.primary} onPress={() => setScreen({ k: "idle" })}>
+                <Text style={s.primaryText}>START OVER</Text>
+              </Pressable>
+            </View>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
