@@ -32,6 +32,18 @@ WRITER_MODEL_ID = "amazon.nova-pro-v1:0"
 DRAFTER_MODEL_ID = "amazon.nova-lite-v1:0"
 REGION = "us-east-1"
 
+# Explicit output ceilings, because the default is the model's and a node that
+# runs into it raises MaxTokensReachedException mid-generation. Observed live:
+# the writer hit the cap partway through, never reached commit_escalations, and
+# the deterministic floor delivered the sweep as pending review. The floor
+# behaved correctly, but a run that reaches the attorney is better than a run
+# the floor has to rescue, so each node gets room sized to what it actually
+# emits: the writer produces one short rationale per interrupt-now case, the
+# analyst one observation set per noted case, the drafter one memo per commit.
+ANALYST_MAX_TOKENS = 4096
+WRITER_MAX_TOKENS = 4096
+DRAFTER_MAX_TOKENS = 4096
+
 _BOUNDARY = (
     "Hard boundary, non-negotiable: you provide legal information and "
     "operational triage only, never legal advice. Never recommend a defense, "
@@ -88,10 +100,23 @@ DRAFTER_PROMPT = (
 ) + _BOUNDARY
 
 
-def build_triage_graph(ctx: RunContext, plugins: list[Any] | None = None) -> Graph:
+def build_triage_graph(
+    ctx: RunContext,
+    plugins: list[Any] | None = None,
+    session_manager: Any | None = None,
+) -> Graph:
     """Build the graph. ``plugins`` exists for the evals harness (chaos
     injection attaches as a standard Strands plugin); production passes
-    none."""
+    none.
+
+    ``session_manager`` is what lets an attorney answer hours later. It must
+    be attached to the BUILDER rather than to the finished graph, because the
+    graph registers it as a hook provider at construction and restores its
+    persisted state from that registration; assigning it afterwards leaves a
+    graph that looks configured and silently resumes nothing. The deployed
+    runtime passes an ``S3SessionManager``; the CLI and the evals pass none
+    and resume in-session.
+    """
     tools = build_tools(ctx)
     audit_hook = AuditToolHook(ctx)
     approval_hook = AttorneyApprovalHook(ctx)
@@ -99,7 +124,9 @@ def build_triage_graph(ctx: RunContext, plugins: list[Any] | None = None) -> Gra
 
     analyst = Agent(
         name="notes_analyst",
-        model=BedrockModel(model_id=ANALYST_MODEL_ID, region_name=REGION),
+        model=BedrockModel(
+            model_id=ANALYST_MODEL_ID, region_name=REGION, max_tokens=ANALYST_MAX_TOKENS
+        ),
         system_prompt=ANALYST_PROMPT,
         tools=[tools["list_cases_with_notes"], tools["submit_case_observations"]],
         hooks=[audit_hook],
@@ -109,7 +136,9 @@ def build_triage_graph(ctx: RunContext, plugins: list[Any] | None = None) -> Gra
     )
     writer = Agent(
         name="escalation_writer",
-        model=BedrockModel(model_id=WRITER_MODEL_ID, region_name=REGION),
+        model=BedrockModel(
+            model_id=WRITER_MODEL_ID, region_name=REGION, max_tokens=WRITER_MAX_TOKENS
+        ),
         system_prompt=WRITER_PROMPT,
         tools=[
             tools["get_ranked_queue"],
@@ -123,7 +152,9 @@ def build_triage_graph(ctx: RunContext, plugins: list[Any] | None = None) -> Gra
     )
     drafter = Agent(
         name="packet_drafter",
-        model=BedrockModel(model_id=DRAFTER_MODEL_ID, region_name=REGION),
+        model=BedrockModel(
+            model_id=DRAFTER_MODEL_ID, region_name=REGION, max_tokens=DRAFTER_MAX_TOKENS
+        ),
         system_prompt=DRAFTER_PROMPT,
         tools=[tools["write_packet_memo"]],
         hooks=[audit_hook],
@@ -144,6 +175,8 @@ def build_triage_graph(ctx: RunContext, plugins: list[Any] | None = None) -> Gra
     builder.add_edge("analyst", "writer")
     builder.add_edge("writer", "drafter", condition=attorney_approved_something)
     builder.set_entry_point("analyst")
+    if session_manager is not None:
+        builder.set_session_manager(session_manager)
     # The graph is a 3-node DAG; these are hard backstops so a runaway
     # execution can never bill unbounded (an unattended agent's failure
     # mode is cost, not just wrong output).

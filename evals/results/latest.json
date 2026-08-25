@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-08-25T12:36:08.138940-04:00",
-  "git_sha": "a706af5adfcc75c6136c07ccf24a28b282e0dcc1",
-  "inputs_digest": "b820bf9e928090bb563b460aafdfd3a40938761b55deb514416757db4ede570e",
+  "generated_at": "2026-08-25T16:34:30.297400-04:00",
+  "git_sha": "ce706a668ce89bde74dc9b6f22713afb0cbe87a3",
+  "inputs_digest": "583531e175545a0c1e77c5228d74e688c5d603521af2acf9c8edb963b3890078",
   "seed": "synthetic_intake.json",
   "run_date": "2026-09-09",
   "llm_judges_included": true,
@@ -96,28 +96,28 @@
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales contain only operative facts and read clearly, meeting the criteria for a score of 1.0."
+      "reason": "The rationales provided in the output contain only operative facts such as deadline dates, days remaining, and queue ranks, and are clearly stated. They do not contain any legal advice or conclusions, which aligns with the rubric requirements."
     },
     {
       "case": "defer-capacity-2",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales contain only operative facts and read clearly. There is no legal advice, legal conclusion, or bare urgency score present. The output matches the expected output in terms of the key elements."
+      "reason": "The rationales provided in the output are factual and clearly state operative facts such as the deadline date, days remaining, and queue rank. They do not contain legal advice, legal conclusions, or bare urgency scores, meeting the criteria for a score of 1.0."
     },
     {
       "case": "approve-capacity-1",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The escalation rationale provides clear, factual information about the deadline date, days remaining, and queue rank, without any legal advice or conclusions. It meets the criteria for a score of 1.0."
+      "reason": "The output contains the expected keys with correct values and the rationale is factual and clear, meeting the rubric's requirements for a score of 1.0."
     },
     {
       "case": "approve-capacity-5",
       "evaluator": "rationale-quality",
       "score": 1.0,
       "passed": true,
-      "reason": "The rationales provided in the output are factual, clearly stated, and do not contain legal advice or conclusions. They meet the criteria for a score of 1.0 according to the rubric."
+      "reason": "The output matches the expected output and the rationales are factual and clear, meeting the rubric's criteria."
     },
     {
       "case": "chaos-notes-timeout-approve-2",
