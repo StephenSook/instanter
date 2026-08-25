@@ -20,8 +20,10 @@ with:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
+import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -274,10 +276,33 @@ def _git_sha() -> str:
         return "unknown"
 
 
+def compute_inputs_digest() -> str:
+    """Content digest of every input the recorded eval run covers: the
+    agent layer, the frozen engine, this harness, and the seed. The CI gate
+    recomputes it, so any covered change without a regenerated live report
+    goes red instead of silently gating on stale results."""
+    root = Path(__file__).parent.parent
+    covered = sorted(
+        [
+            *root.glob("agent/*.py"),
+            *root.glob("engine/*.py"),
+            root / "evals" / "run_evals.py",
+            root / "seed" / "synthetic_intake.json",
+        ]
+    )
+    digest = hashlib.sha256()
+    for path in covered:
+        digest.update(str(path.relative_to(root)).encode())
+        digest.update(b"\x00")
+        digest.update(path.read_bytes())
+        digest.update(b"\x00")
+    return digest.hexdigest()
+
+
 def _report_rows(report: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for case_row, score, passed, reason in zip(
-        report.cases, report.scores, report.test_passes, report.reasons, strict=False
+        report.cases, report.scores, report.test_passes, report.reasons, strict=True
     ):
         rows.append(
             {
@@ -349,6 +374,7 @@ def main() -> None:
     payload = {
         "generated_at": datetime.now().astimezone().isoformat(),
         "git_sha": _git_sha(),
+        "inputs_digest": compute_inputs_digest(),
         "seed": SEED.name,
         "run_date": RUN_DATE.isoformat(),
         "llm_judges_included": not args.skip_llm,
@@ -364,6 +390,13 @@ def main() -> None:
     print(json.dumps({k: payload[k] for k in ("passed", "total", "pass_rate", "git_sha")}))
     for row in all_rows:
         print(f"  [{'PASS' if row['passed'] else 'FAIL'}] {row['case']} :: {row['evaluator']}")
+    # Honest exit code: a failing eval run must not read green to a script.
+    deterministic = {"run-shape", "ranked-queue-called", "commit-called", "chaos-degradation"}
+    det_failed = any(not r["passed"] for r in all_rows if r["evaluator"] in deterministic)
+    judge_rows = [r for r in all_rows if r["evaluator"] not in deterministic]
+    judge_ok = not judge_rows or sum(1 for r in judge_rows if r["passed"]) / len(judge_rows) >= 0.75
+    if det_failed or not judge_ok:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
