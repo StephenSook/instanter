@@ -293,7 +293,32 @@ def run_live(
         # closed deferral instead of a replayed approval the human never
         # gave for that content.
         response_consumed = False
+        # Hard bound on the interrupt cycle: the graph's own caps cannot
+        # bound it (an interrupted node execution returns before it is
+        # counted toward max_node_executions, and the execution timeout
+        # resets on every resume), so a writer that keeps retrying the
+        # commit would otherwise spin interrupt -> synthetic answer ->
+        # retry forever, burning model calls with no floor, no report,
+        # and no exit. After the cap the run is a model error; the floor
+        # below still delivers the sweep.
+        interrupt_rounds = 0
         while result.status == Status.INTERRUPTED:
+            interrupt_rounds += 1
+            if interrupt_rounds > 3:
+                model_error = (
+                    "interrupt limit reached: the graph raised more than 3 "
+                    "interrupts in one run; treating the model layer as failed"
+                )
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="model_error",
+                        case_id=None,
+                        payload={"error": model_error, "phase": "interrupt_limit"},
+                        run_id=ctx.run_id,
+                    )
+                )
+                graph_status = "INTERRUPT_LIMIT"
+                break
             responses: list[InterruptResponseContent] = []
             for interrupt in result.interrupts:
                 if response_consumed:
@@ -313,20 +338,21 @@ def run_live(
                     }
                 )
             result = graph(responses)
-        graph_status = str(result.status)
-        if result.status != Status.COMPLETED:
-            # A FAILED terminal status is a model-layer death even though
-            # nothing raised; the floor may still bound the damage, but the
-            # run must never read green over it.
-            model_error = f"graph ended with terminal status {result.status}"
-            ctx.audit.append(
-                AuditEvent(
-                    kind="model_error",
-                    case_id=None,
-                    payload={"error": model_error, "phase": "graph_terminal_status"},
-                    run_id=ctx.run_id,
+        if graph_status != "INTERRUPT_LIMIT":
+            graph_status = str(result.status)
+            if result.status != Status.COMPLETED:
+                # A FAILED terminal status is a model-layer death even though
+                # nothing raised; the floor may still bound the damage, but
+                # the run must never read green over it.
+                model_error = f"graph ended with terminal status {result.status}"
+                ctx.audit.append(
+                    AuditEvent(
+                        kind="model_error",
+                        case_id=None,
+                        payload={"error": model_error, "phase": "graph_terminal_status"},
+                        run_id=ctx.run_id,
+                    )
                 )
-            )
     except Exception as exc:
         graph_status = f"RAISED:{type(exc).__name__}"
         model_error = f"{type(exc).__name__}: {exc}"[:400]

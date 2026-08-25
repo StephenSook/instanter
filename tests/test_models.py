@@ -370,7 +370,6 @@ def test_may_context_covers_attributive_and_month_first_forms() -> None:
         "due by May",
         "the answer is due by christmas",
         "the deadline falls on thanksgiving",
-        "due on the weekend after service",
     ):
         with pytest.raises(ValueError):
             reject_model_numerics(poisoned, "notes")
@@ -380,5 +379,38 @@ def test_may_context_covers_attributive_and_month_first_forms() -> None:
         "whether the answer described by may already be on file",
         "service may be defective",
         "the tenant plans to resolve arrears this week",
+    ):
+        assert reject_model_numerics(legal, "notes")
+
+
+def test_may_context_round19_dodges_and_hedges() -> None:
+    """Round-19: for/to/into/through prepositions, plural and article
+    attributives, and possessives dodged the month pattern; relative-clause
+    hedges ('complained of may invalidate') false-positived."""
+    from agent.models import reject_model_numerics
+
+    for poisoned in (
+        "The hearing is set for May.",
+        "The case was reset to May.",
+        "carried over into May.",
+        "The stay runs through May.",
+        "The May hearings will resolve the docket.",
+        "A May hearing is expected.",
+        "May's docket includes this case.",
+    ):
+        with pytest.raises(ValueError):
+            reject_model_numerics(poisoned, "notes")
+    for legal in (
+        "The defect complained of may invalidate the service.",
+        "The conduct complained of may amount to improper notice.",
+        "The irregularity complained of may constitute defective service.",
+        "The problem complained of may well be defective service.",
+        "The posting spoken of may or might not have occurred.",
+        # Round-19 wordlist rebalance: street names, agency names, and
+        # honest weekend prose are legal again.
+        "confirm which unit on Memorial Drive the posted notice refers to",
+        "confirm whether the tenant receives Veterans Affairs housing assistance",
+        "the courthouse was closed over the weekend when the tenant tried to file",
+        "the tenant asserts independence from the co-signer",
     ):
         assert reject_model_numerics(legal, "notes")
