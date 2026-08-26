@@ -454,7 +454,13 @@ def list_awaiting() -> dict[str, Any]:
                 parsed = {}
             waiting.append(
                 {
-                    "run_id": item["run_id"],
+                    # NO run_id. This endpoint is public, and POST
+                    # /api/run/{id}/decision performs no authorization, so
+                    # publishing the id of an unattended run would let any
+                    # stranger approve or defer the clinic's morning sweep.
+                    # That directly contradicts the claim this product is built
+                    # on, that a licensed attorney decides. The console only
+                    # ever needed the count.
                     "origin": item.get("origin", "visitor"),
                     "created_at": int(item.get("created_at", 0)),
                     "cases": len(parsed.get("awaiting") or []),

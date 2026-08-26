@@ -565,3 +565,26 @@ def test_a_capped_scheduled_sweep_also_raises(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
     with pytest.raises(RuntimeError, match="scheduled sweep failed"):
         door.handler({"instanter_scheduled_sweep": True})
+
+
+def test_awaiting_does_not_publish_run_ids_a_stranger_could_decide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The critical finding, as a test.
+
+    /api/awaiting is public and POST /api/run/{id}/decision does no
+    authorization, so publishing a scheduled run's id would let any stranger
+    approve the clinic's morning sweep. That contradicts the one claim this
+    product rests on.
+    """
+    fake = _PagedFakeTable([[_row("secret-run-id", "scheduled", cases=2)]])
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+
+    status, body = call("/api/awaiting")
+    assert status == 200
+    assert body["count"] == 1
+    assert "secret-run-id" not in json.dumps(body), "a decidable run id was published"
+    assert all("run_id" not in row for row in body["awaiting"])
+    # The count still works, which is all the console ever needed.
+    assert body["awaiting"][0]["cases"] == 2
