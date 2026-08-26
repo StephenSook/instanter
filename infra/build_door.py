@@ -17,6 +17,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -37,21 +38,36 @@ SOURCES = [
 ]
 
 
+def _pip_download(dest: Path, *args: str) -> None:
+    cmd = [
+        "uv",
+        "run",
+        "--with",
+        "pip",
+        "python",
+        "-m",
+        "pip",
+        "download",
+        *args,
+        "-d",
+        str(dest),
+    ]
+    subprocess.check_call(cmd, cwd=ROOT)
+
+
 def _vendor_pywebpush(build: Path) -> bool:
-    """Unpack manylinux wheels so Lambda can send Web Push.
+    """Unpack Linux wheels so Lambda can send Web Push.
 
     pip-installing on a Mac would ship Darwin cryptography, which Lambda
     cannot import. A missing pywebpush at runtime is a silent no-op, so
     the build must fail here rather than deploy a door that cannot ping.
+
+    pywebpush 1.14.1 uses requests (sync, Lambda-safe) rather than aiohttp.
+    http-ece ships only an sdist; native deps are fetched as manylinux wheels.
     """
     vendor = build / "_wheels"
     vendor.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        sys.executable,
-        "-m",
-        "pip",
-        "download",
-        "pywebpush",
+    linux = [
         "--platform",
         "manylinux2014_x86_64",
         "--python-version",
@@ -60,24 +76,51 @@ def _vendor_pywebpush(build: Path) -> bool:
         "cp",
         "--only-binary",
         ":all:",
-        "-d",
-        str(vendor),
     ]
     try:
-        subprocess.check_call(cmd)
+        _pip_download(vendor, "cryptography", *linux)
+        _pip_download(vendor, "charset-normalizer", "--no-deps", *linux)
+        _pip_download(vendor, "pywebpush==1.14.1", "--no-deps")
+        _pip_download(vendor, "requests", "--no-deps")
+        _pip_download(vendor, "idna", "--no-deps")
+        _pip_download(vendor, "urllib3", "--no-deps")
+        _pip_download(vendor, "certifi", "--no-deps")
+        _pip_download(vendor, "py-vapid", "--no-deps")
+        _pip_download(vendor, "six", "--no-deps")
+        _pip_download(vendor, "http-ece", "--no-deps")
     except subprocess.CalledProcessError:
-        print("FAILED to download manylinux pywebpush wheels", file=sys.stderr)
+        print("FAILED to download Web Push wheels", file=sys.stderr)
         return False
-    wheels = list(vendor.glob("*.whl"))
-    if not wheels:
-        print("pip download wrote no wheels", file=sys.stderr)
+    artifacts = list(vendor.iterdir())
+    if not artifacts:
+        print("pip download wrote nothing", file=sys.stderr)
         return False
-    for wheel in wheels:
-        with zipfile.ZipFile(wheel) as zf:
-            zf.extractall(build)
+    banned = ("macosx", "darwin", "universal2", "win_amd64", "win32")
+    for art in artifacts:
+        name = art.name.lower()
+        if any(tag in name for tag in banned):
+            print(f"refusing Darwin/Windows wheel: {art.name}", file=sys.stderr)
+            return False
+        if art.suffix == ".whl":
+            with zipfile.ZipFile(art) as zf:
+                zf.extractall(build)
+        elif art.name.endswith(".tar.gz"):
+            with tarfile.open(art) as tf:
+                tf.extractall(vendor / "_sdist", filter="data")
+            packages = list((vendor / "_sdist").glob("*/http_ece"))
+            if not packages:
+                print("http-ece sdist had no http_ece package", file=sys.stderr)
+                return False
+            shutil.copytree(packages[0], build / "http_ece", dirs_exist_ok=True)
+        else:
+            print(f"unexpected artifact {art.name}", file=sys.stderr)
+            return False
     shutil.rmtree(vendor)
-    if not any(build.glob("pywebpush*")):
+    if not (build / "pywebpush").exists() and not list(build.glob("pywebpush-*.dist-info")):
         print("pywebpush did not unpack into the door bundle", file=sys.stderr)
+        return False
+    if not (build / "http_ece").exists():
+        print("http_ece did not unpack into the door bundle", file=sys.stderr)
         return False
     return True
 

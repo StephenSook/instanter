@@ -57,7 +57,7 @@ def notify_interrupt(table: Any) -> int:
     if not VAPID_PRIVATE_KEY or not PUSH_TABLE:
         return 0
     try:
-        from pywebpush import WebPusher, WebPushException  # type: ignore[import-not-found]
+        from pywebpush import WebPushException, webpush  # type: ignore[import-not-found]
     except ImportError:
         return 0
     sent = 0
@@ -70,13 +70,12 @@ def notify_interrupt(table: Any) -> int:
     vapid_claims = {"sub": VAPID_MAILTO}
     for item in items:
         try:
-            WebPusher(
-                {
+            webpush(
+                subscription_info={
                     "endpoint": item["endpoint"],
                     "keys": {"p256dh": item["p256dh"], "auth": item["auth"]},
-                }
-            ).send(
-                payload,
+                },
+                data=payload,
                 vapid_private_key=VAPID_PRIVATE_KEY,
                 vapid_claims=vapid_claims,
                 ttl=120,
