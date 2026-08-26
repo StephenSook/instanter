@@ -743,6 +743,7 @@ def test_what_if_weekend_roll_matches_the_engine() -> None:
     )
     status, body = call("/api/what-if", query={"service_date": "2026-08-08"})
     assert status == 200
+    assert engine.computed_deadline is not None
     assert body["computed_deadline"] == engine.computed_deadline.isoformat() == "2026-08-17"
     assert body["effective_deadline"] == "2026-08-17"
     assert "Saturday; roll forward" in " ".join(step["label"] for step in body["trace"])
@@ -767,6 +768,7 @@ def test_what_if_dec_31_trap_matches_the_engine() -> None:
     )
     status, body = call("/api/what-if", query={"service_date": "2026-12-24"})
     assert status == 200
+    assert engine.computed_deadline is not None
     assert body["computed_deadline"] == engine.computed_deadline.isoformat() == "2026-12-31"
     codes = {flag["code"] for flag in body["flags"]}
     assert FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY.value in codes
