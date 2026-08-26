@@ -163,6 +163,13 @@ export interface AwaitingCase {
   rationale: string | null;
 }
 
+export interface RunStep {
+  seq: number;
+  kind: string;
+  detail?: string;
+  case_id?: string | null;
+}
+
 export interface RunResult {
   interrupted: boolean;
   status?: string;
@@ -177,6 +184,8 @@ export interface RunResult {
   backstop_used?: boolean;
   model_error?: string;
   succeeded?: boolean;
+  steps?: RunStep[];
+  audit?: RunStep[];
 }
 
 export interface RunEnvelope {
@@ -224,6 +233,52 @@ async function send(path: string, body?: unknown): Promise<RunEnvelope> {
     throw new DoorError(detail, response.status, parsed);
   }
   return parsed as unknown as RunEnvelope;
+}
+
+export interface WhatIfFlag {
+  code: string;
+  reason: string;
+  day: string | null;
+}
+
+export interface WhatIfTrace {
+  day: string;
+  label: string;
+}
+
+export interface WhatIf {
+  service_date: string;
+  service_method: string;
+  computed_deadline: string | null;
+  effective_deadline: string | null;
+  deadline_basis: string;
+  citation: string;
+  flags: WhatIfFlag[];
+  trace: WhatIfTrace[];
+  court_reopens_on: string | null;
+  label: string;
+}
+
+export async function loadWhatIf(serviceDate: string): Promise<WhatIf> {
+  const params = new URLSearchParams({ service_date: serviceDate });
+  const response = await fetch(`/api/what-if?${params.toString()}`, { cache: "no-store" });
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    parsed = (await response.json()) as Record<string, unknown>;
+  } catch {
+    parsed = null;
+  }
+  if (!response.ok) {
+    const detail =
+      (parsed?.detail as string) || (parsed?.error as string) || `HTTP ${response.status}`;
+    throw new DoorError(detail, response.status, parsed);
+  }
+  return parsed as unknown as WhatIf;
+}
+
+export function receiptSteps(result: RunResult): RunStep[] {
+  const raw = result.steps ?? result.audit ?? [];
+  return [...raw].sort((a, b) => a.seq - b.seq);
 }
 
 export function startRun(capacity = 2): Promise<RunEnvelope> {

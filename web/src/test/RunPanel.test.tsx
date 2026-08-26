@@ -33,6 +33,13 @@ const AWAITING = {
       rationale: "Due today.",
     },
   ],
+  steps: [
+    { seq: 1, kind: "ingest", detail: "48 cases read" },
+    { seq: 2, kind: "extract" },
+    { seq: 3, kind: "compute" },
+    { seq: 4, kind: "rank" },
+    { seq: 5, kind: "stop", detail: "attorney interrupt" },
+  ],
 };
 
 function jsonResponse(body: unknown, status = 200) {
@@ -147,6 +154,47 @@ describe("the daily spend cap", () => {
     expect(screen.getByText(/201 started today against a cap of 200/)).toBeInTheDocument();
     // Not the generic failure panel.
     expect(screen.queryByText(/the run did not start/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("the attorney desk and the receipt", () => {
+  it("puts interrupt case ids from the payload on the attorney-desk surface", async () => {
+    await startAndAwait();
+    const desk = screen.getByRole("region", { name: /attorney desk/i });
+    expect(desk).toHaveTextContent("26ED00101");
+    expect(desk).toHaveTextContent("26ED00102");
+  });
+
+  it("still names those cases on the desk when motion is reduced", async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      await startAndAwait();
+      const desk = screen.getByRole("region", { name: /attorney desk/i });
+      expect(desk).toHaveTextContent("26ED00101");
+      expect(desk).toHaveTextContent("26ED00102");
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it("prints the run's own steps in order, not a hardcoded pipeline", async () => {
+    await startAndAwait();
+    const receipt = screen.getByRole("list", { name: /run receipt/i });
+    const kinds = [...receipt.querySelectorAll("li")].map((li) => li.textContent ?? "");
+    expect(kinds.map((t) => t.toLowerCase()).join(" ")).toMatch(/ingest[\s\S]*extract[\s\S]*compute[\s\S]*rank[\s\S]*stop/);
+    expect(receipt).toHaveTextContent("ingest");
+    expect(receipt).toHaveTextContent("extract");
+    expect(receipt).toHaveTextContent("48 cases read");
   });
 });
 

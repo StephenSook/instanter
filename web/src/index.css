@@ -83,6 +83,16 @@ body {
   border-radius: 2px;
 }
 
+/* Folder loader: a single slam-up, capped well under 1.5s, skippable in the
+   component. Disabled outright by the reduced-motion rule below. */
+@keyframes folder-open {
+  from { transform: translateY(28%) scale(1.08); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+.folder-open {
+  animation: folder-open 0.5s var(--ease-folder) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

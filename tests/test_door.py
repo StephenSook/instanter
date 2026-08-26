@@ -29,13 +29,18 @@ import handler as door  # noqa: E402
 
 
 def event(
-    path: str, method: str = "GET", body: str | None = None, headers: dict[str, str] | None = None
+    path: str,
+    method: str = "GET",
+    body: str | None = None,
+    headers: dict[str, str] | None = None,
+    query: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "rawPath": path,
         "requestContext": {"http": {"method": method}},
         "body": body,
         "headers": headers or {},
+        "queryStringParameters": query or {},
     }
 
 
@@ -711,3 +716,76 @@ def test_an_unsubstituted_scheduler_token_is_not_parsed_as_a_date(
     )
     # Falls back to today in court time rather than crashing or sending junk.
     assert captured["run_date"] and captured["run_date"][0].isdigit()
+
+
+# ----------------------------------------------------------------- what-if
+
+
+def test_what_if_weekend_roll_matches_the_engine() -> None:
+    """Service Sat-window 2026-08-08: day 7 is Saturday, statute rolls to Monday.
+
+    Same inputs as tests/test_deadline.py::test_weekend_roll. The door must
+    return the engine's date, not a count the UI invented.
+    """
+    from datetime import date
+
+    from engine.deadline import CaseInput, compute_deadline
+    from engine.rules import GEORGIA_RULE, ServiceMethod
+
+    engine = compute_deadline(
+        CaseInput(
+            case_id="what-if",
+            jurisdiction_id="GA-FULTON",
+            service_date=date(2026, 8, 8),
+            service_method=ServiceMethod.PERSONAL,
+        ),
+        GEORGIA_RULE,
+    )
+    status, body = call("/api/what-if", query={"service_date": "2026-08-08"})
+    assert status == 200
+    assert body["computed_deadline"] == engine.computed_deadline.isoformat() == "2026-08-17"
+    assert body["effective_deadline"] == "2026-08-17"
+    assert "Saturday; roll forward" in " ".join(step["label"] for step in body["trace"])
+    assert all(flag["code"] != "court_closed_not_legal_holiday" for flag in body["flags"])
+
+
+def test_what_if_dec_31_trap_matches_the_engine() -> None:
+    """Service 2026-12-24: day 7 is Dec 31, courthouse closed, statute does not roll."""
+    from datetime import date
+
+    from engine.deadline import CaseInput, FlagCode, compute_deadline
+    from engine.rules import GEORGIA_RULE, ServiceMethod
+
+    engine = compute_deadline(
+        CaseInput(
+            case_id="what-if",
+            jurisdiction_id="GA-FULTON",
+            service_date=date(2026, 12, 24),
+            service_method=ServiceMethod.PERSONAL,
+        ),
+        GEORGIA_RULE,
+    )
+    status, body = call("/api/what-if", query={"service_date": "2026-12-24"})
+    assert status == 200
+    assert body["computed_deadline"] == engine.computed_deadline.isoformat() == "2026-12-31"
+    codes = {flag["code"] for flag in body["flags"]}
+    assert FlagCode.COURT_CLOSED_NOT_LEGAL_HOLIDAY.value in codes
+    assert engine.computed_deadline == date(2026, 12, 31)
+
+
+def test_what_if_refuses_to_guess_a_date() -> None:
+    status, body = call("/api/what-if")
+    assert status == 400
+    assert body["error"] == "service_date_required"
+
+
+def test_what_if_refuses_a_malformed_date() -> None:
+    status, body = call("/api/what-if", query={"service_date": "August 8"})
+    assert status == 400
+    assert body["error"] == "invalid_service_date"
+
+
+def test_attach_steps_does_not_invent_kinds_when_the_payload_already_has_them() -> None:
+    original = [{"seq": 1, "kind": "extract"}]
+    out = door.attach_steps({"total_cases": 48, "interrupted": True, "steps": original})
+    assert out["steps"] == original

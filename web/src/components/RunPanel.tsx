@@ -4,6 +4,7 @@ import {
   DoorError,
   decideRun,
   outcomeOf,
+  receiptSteps,
   startRun,
   type AwaitingCase,
   type RunEnvelope,
@@ -76,7 +77,10 @@ function Stamp({ label, tone }: { label: string; tone: string }) {
 function CaseRow({ c }: { c: AwaitingCase }) {
   const overdue = c.days_remaining !== null && c.days_remaining < 0;
   return (
-    <li className="paper-grain rounded-[3px] bg-[var(--color-paper)] p-4 text-[var(--color-ink)]">
+    <li
+      data-desk-card
+      className="paper-grain rounded-[3px] bg-[var(--color-paper)] p-4 text-[var(--color-ink)]"
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="font-mono text-[0.95rem] font-semibold">{c.case_id}</span>
         <span
@@ -195,11 +199,8 @@ export function RunPanel() {
             {state.result.total_cases} swept &middot; nothing is committed until you answer
           </p>
 
-          <ul className="mt-6 grid gap-3 sm:grid-cols-2">
-            {(state.result.awaiting ?? []).map((c) => (
-              <CaseRow key={c.case_id} c={c} />
-            ))}
-          </ul>
+          <AttorneyDesk cases={state.result.awaiting ?? []} />
+          <RunReceipt result={state.result} />
 
           <div className="mt-7 flex flex-wrap items-center gap-3">
             <button
@@ -266,6 +267,61 @@ export function RunPanel() {
   );
 }
 
+function AttorneyDesk({ cases }: { cases: AwaitingCase[] }) {
+  const reduced =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const deskRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const node = deskRef.current;
+    if (!node || reduced) return;
+    const cards = node.querySelectorAll("[data-desk-card]");
+    if (cards.length === 0) return;
+    gsap.fromTo(
+      cards,
+      { y: 56, opacity: 0, rotate: -4 },
+      { y: 0, opacity: 1, rotate: 0, duration: 0.45, stagger: 0.08, ease: "power4.out" },
+    );
+  }, [cases, reduced]);
+
+  return (
+    <section
+      ref={deskRef}
+      aria-label="Attorney desk"
+      className="mt-6 rounded-[3px] border border-white/10 bg-[#2a241c] p-4 sm:p-5"
+    >
+      <p className="font-mono text-[0.62rem] tracking-[0.2em] text-white/55 uppercase">
+        Transferred from the cabinet
+      </p>
+      <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+        {cases.map((c) => (
+          <CaseRow key={c.case_id} c={c} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function RunReceipt({ result }: { result: RunResult }) {
+  const steps = receiptSteps(result);
+  if (steps.length === 0) return null;
+  return (
+    <ol
+      aria-label="Run receipt"
+      className="mt-6 space-y-1 border-t border-white/10 pt-4 font-mono text-[0.7rem] text-white/80"
+    >
+      {steps.map((step) => (
+        <li key={step.seq} className="flex gap-3">
+          <span className="tabular-nums text-white/45">{String(step.seq).padStart(2, "0")}</span>
+          <span className="uppercase tracking-[0.12em]">{step.kind}</span>
+          {step.detail && <span className="text-white/55">{step.detail}</span>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function Resolved({ runId, result }: { runId: string; result: RunResult }) {
   const outcome = outcomeOf(result);
   const committed = result.committed ?? [];
@@ -315,6 +371,8 @@ function Resolved({ runId, result }: { runId: string; result: RunResult }) {
           Still owed a human decision: {result.failures?.join(", ")}
         </p>
       )}
+
+      <RunReceipt result={result} />
 
       <button
         type="button"

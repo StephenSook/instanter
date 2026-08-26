@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Lenis from "lenis";
 import gsap from "gsap";
 import { Cabinet } from "./components/Cabinet";
@@ -6,6 +6,8 @@ import { LiveProof } from "./components/LiveProof";
 import { SweepBanner } from "./components/SweepBanner";
 import { RunPanel } from "./components/RunPanel";
 import { Packet } from "./components/Packet";
+import { FolderLoader } from "./components/FolderLoader";
+import { WhatIfCalendar } from "./components/WhatIfCalendar";
 import { loadQueue, type QueueSnapshot } from "./data";
 
 type Route = { name: "cabinet" } | { name: "case"; id: string };
@@ -20,6 +22,8 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<QueueSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [route, setRoute] = useState<Route>(readRoute);
+  const [loader, setLoader] = useState(true);
+  const dismissLoader = useCallback(() => setLoader(false), []);
 
   useEffect(() => {
     loadQueue().then(setSnapshot).catch((e: Error) => setError(e.message));
@@ -57,6 +61,7 @@ export default function App() {
 
   return (
     <div className="min-h-full">
+      {loader && <FolderLoader onDone={dismissLoader} />}
       <header className="sticky top-0 z-50 border-b border-white/10 bg-[var(--color-ground)]/85 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1400px] items-center justify-between px-5 py-3.5 sm:px-10">
           <a href="#/" className="display text-[1.15rem] tracking-wide">
@@ -87,6 +92,7 @@ export default function App() {
             sat ABOVE it, the panel jumped a full screen upwards the moment
             the snapshot arrived and the placeholder was removed. */}
         {route.name === "cabinet" && <RunPanel />}
+        {route.name === "cabinet" && <WhatIfCalendar />}
 
         {/* The placeholder stands exactly where the queue will go, and
             reserves a screen so the footer stays below the fold in both

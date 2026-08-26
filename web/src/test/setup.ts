@@ -4,6 +4,14 @@ import "@testing-library/jest-dom/vitest";
 // console disables motion under a reduced-motion preference, and every panel
 // reads from the network. Leaving them undefined would make components throw
 // for reasons that have nothing to do with what is being tested.
+if (!window.ResizeObserver) {
+  window.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}
+
 if (!window.matchMedia) {
   window.matchMedia = ((query: string) => ({
     matches: false,

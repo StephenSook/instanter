@@ -11,6 +11,9 @@ Four endpoints, and only one of them is the point:
                                 deadline in the corpus with the real engine, on
                                 request, and reports how many of them hand
                                 counting gets wrong. No cache, no stored answer.
+* ``GET  /api/what-if``         one statutory computation on a date the visitor
+                                chose. Same ``compute_deadline`` the tests cover.
+                                Pure arithmetic, never capped.
 * ``POST /api/run``             start a triage sweep on the deployed agent.
 * ``GET  /api/run/{id}``        poll it. The door polls because a managed Python
                                 Lambda cannot stream (ADR-0006).
@@ -262,6 +265,131 @@ def compute_stats() -> dict[str, Any]:
     }
 
 
+def compute_what_if(service_date: date, method: ServiceMethod) -> dict[str, Any]:
+    """One statutory computation on a date the visitor chose.
+
+    Imports ``compute_deadline``; it does not reimplement the count. The
+    console is allowed to *display* this payload, never to invent a date,
+    a day count, or a flag of its own.
+    """
+    case = CaseInput(
+        case_id="what-if",
+        jurisdiction_id=GEORGIA_RULE.jurisdiction_id,
+        service_date=service_date,
+        service_method=method,
+    )
+    result = compute_deadline(case, GEORGIA_RULE)
+    return {
+        "service_date": service_date.isoformat(),
+        "service_method": method.value,
+        "computed_deadline": (
+            result.computed_deadline.isoformat() if result.computed_deadline else None
+        ),
+        "effective_deadline": (
+            result.effective_deadline.isoformat() if result.effective_deadline else None
+        ),
+        "deadline_basis": result.deadline_basis.value,
+        "citation": result.citation,
+        "flags": [
+            {
+                "code": flag.code.value,
+                "reason": flag.reason,
+                "day": flag.day.isoformat() if flag.day else None,
+            }
+            for flag in result.flags
+        ],
+        "trace": [{"day": step.day.isoformat(), "label": step.label} for step in result.trace],
+        "court_reopens_on": (
+            result.court_reopens_on.isoformat() if result.court_reopens_on else None
+        ),
+        "label": (
+            "EXAMPLE DATA: this is a statutory computation on a date you chose, "
+            "not a live case file."
+        ),
+    }
+
+
+def what_if_from_event(event: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+    """Parse the visitor's date out of the query string or JSON body."""
+    params = dict(event.get("queryStringParameters") or {})
+    raw_qs = event.get("rawQueryString") or ""
+    if not params and raw_qs:
+        for pair in raw_qs.split("&"):
+            if "=" not in pair:
+                continue
+            key, value = pair.split("=", 1)
+            params[key] = value
+    raw_date = str(params.get("service_date") or body.get("service_date") or "").strip()
+    raw_method = str(
+        params.get("service_method") or body.get("service_method") or "personal"
+    ).strip()
+    if not raw_date:
+        return _json(
+            400,
+            {
+                "error": "service_date_required",
+                "detail": "Pass service_date=YYYY-MM-DD. The engine will not guess a date.",
+            },
+        )
+    try:
+        service_date = date.fromisoformat(raw_date)
+    except ValueError:
+        return _json(
+            400,
+            {
+                "error": "invalid_service_date",
+                "detail": f"{raw_date!r} is not an ISO date.",
+            },
+        )
+    try:
+        method = ServiceMethod(raw_method)
+    except ValueError:
+        return _json(
+            400,
+            {
+                "error": "invalid_service_method",
+                "detail": f"{raw_method!r} is not a ServiceMethod.",
+            },
+        )
+    return _json(200, compute_what_if(service_date, method))
+
+
+def attach_steps(result: dict[str, Any]) -> dict[str, Any]:
+    """A receipt the console can print without inventing a pipeline.
+
+    If the agent already returned ``steps`` or ``audit``, those win. Otherwise
+    the door names only the stages this payload itself proves happened
+    (a total, an interrupt, a decision). The UI prints this list in order.
+    """
+    if result.get("steps") or result.get("audit"):
+        return result
+    steps: list[dict[str, Any]] = []
+    seq = 1
+    total = result.get("total_cases")
+    if total is not None:
+        steps.append({"seq": seq, "kind": "ingest", "detail": f"{total} cases read"})
+        seq += 1
+    steps.append({"seq": seq, "kind": "compute", "detail": "statutory deadlines"})
+    seq += 1
+    steps.append({"seq": seq, "kind": "rank", "detail": "queue ranked"})
+    seq += 1
+    if result.get("interrupted"):
+        waiting = result.get("awaiting") or []
+        steps.append(
+            {
+                "seq": seq,
+                "kind": "stop",
+                "detail": f"attorney interrupt ({len(waiting)} case(s))",
+            }
+        )
+    else:
+        action = result.get("attorney_action") or "complete"
+        steps.append({"seq": seq, "kind": "stop", "detail": str(action)})
+    out = dict(result)
+    out["steps"] = steps
+    return out
+
+
 # --------------------------------------------------------------------- runs
 
 
@@ -348,7 +476,7 @@ def start_run(
             contentType="application/json",
             accept="application/json",
         )
-        result = json.loads(response["response"].read())
+        result = attach_steps(json.loads(response["response"].read()))
     except Exception as exc:  # surfaced, never swallowed
         table().update_item(
             Key={"run_id": run_id},
@@ -412,7 +540,7 @@ def decide(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
             contentType="application/json",
             accept="application/json",
         )
-        result = json.loads(response["response"].read())
+        result = attach_steps(json.loads(response["response"].read()))
     except Exception as exc:
         return _json(502, {"run_id": run_id, "error": str(exc)[:400]})
 
@@ -638,6 +766,8 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
 
     if path == "/api/stats" and method == "GET":
         return _json(200, compute_stats())
+    if path == "/api/what-if" and method == "GET":
+        return what_if_from_event(event, body)
     if path == "/api/awaiting" and method == "GET":
         return _json(200, list_awaiting())
     if path == "/api/run" and method == "POST":
