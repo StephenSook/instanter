@@ -51,6 +51,12 @@ class JudgeDoorStack(cdk.Stack):
             )
 
         agent_runtime_arn = os.environ.get("AGENT_RUNTIME_ARN", "")
+        if not agent_runtime_arn:
+            # Fail at synth. An empty value overwrites a working door with a
+            # stats-only function, and POST /api/run then 503s.
+            raise ValueError(
+                "AGENT_RUNTIME_ARN is unset. Export the deployed triage runtime before cdk deploy."
+            )
         git_sha = os.environ.get("GIT_SHA", "unknown")
 
         # ---------------------------------------------------------- state

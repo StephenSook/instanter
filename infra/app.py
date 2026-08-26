@@ -1,7 +1,11 @@
 """CDK entry point for the judge's door.
 
 cd infra
-export DOOR_ORIGIN_SECRET=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')
+# On a live stack, reuse the existing Lambda ORIGIN_SECRET. Do not mint a new
+# one. Minting rotates CloudFront's origin header out from under the function
+# and 403s every /api call until they match again.
+export DOOR_ORIGIN_SECRET=...existing from the deployed DoorFunction...
+export AGENT_RUNTIME_ARN=arn:aws:bedrock-agentcore:REGION:ACCOUNT:runtime/instanteragent_triage-...
 ../.venv/bin/python build_door.py
 cdk deploy
 """
