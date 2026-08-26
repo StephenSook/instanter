@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800" font-family="'IBM Plex Mono','SF Mono',Menlo,monospace">
+  <title>Instanter</title>
+  <rect width="1200" height="800" fill="#141414"/>
+
+  <!-- the mark, small, top left: recognition without leading with the name -->
+  <g transform="translate(72,64)">
+    <circle cx="34" cy="34" r="28" fill="none" stroke="#b3271e" stroke-width="8"/>
+    <path d="M34 34 L34 14 A20 20 0 0 1 49.3 21.2 Z" fill="#b3271e"/>
+  </g>
+  <text x="152" y="108" fill="#faf6f0" font-size="30" font-weight="700" letter-spacing="7">INSTANTER</text>
+  <text x="1128" y="106" fill="#8a8a8a" font-size="19" letter-spacing="3" text-anchor="end">STRANDS AGENTS ON AMAZON BEDROCK AGENTCORE</text>
+  <line x1="72" y1="150" x2="1128" y2="150" stroke="#3a3a3a" stroke-width="2"/>
+
+  <!-- the number leads, because the stat is the hook -->
+  <text x="72" y="360" fill="#b3271e" font-size="190" font-weight="700" letter-spacing="-4">4 of 46</text>
+
+  <text x="72" y="424" fill="#faf6f0" font-size="34">answer deadlines in this corpus are ones</text>
+  <text x="72" y="470" fill="#faf6f0" font-size="34">counting seven days by hand gets wrong.</text>
+
+  <text x="72" y="540" fill="#e8c547" font-size="26">A missed answer deadline in a Georgia eviction case is a</text>
+  <text x="72" y="574" fill="#e8c547" font-size="26">default judgment. Which is an eviction.</text>
+
+  <line x1="72" y1="626" x2="1128" y2="626" stroke="#3a3a3a" stroke-width="2"/>
+
+  <text x="72" y="672" fill="#8a8a8a" font-size="22">The agent reads the queue, computes every deadline from the statute,</text>
+  <text x="72" y="704" fill="#8a8a8a" font-size="22">and then stops and asks a licensed attorney before it commits anything.</text>
+
+  <text x="72" y="756" fill="#faf6f0" font-size="21">Recomputed live, no login: d2ew2t4uldglcr.cloudfront.net</text>
+</svg>

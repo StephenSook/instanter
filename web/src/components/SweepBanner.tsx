@@ -28,7 +28,7 @@ type Awaiting = {
 type State =
   | { k: "loading" }
   | { k: "failed"; message: string }
-  | { k: "loaded"; awaiting: Awaiting[] };
+  | { k: "loaded"; awaiting: Awaiting[]; truncated: boolean };
 
 function when(seconds: number): string {
   if (!seconds) return "";
@@ -49,9 +49,17 @@ export function SweepBanner() {
     fetch("/api/awaiting", { headers: { accept: "application/json" } })
       .then(async (r) => {
         if (!r.ok) throw new Error(`the door returned ${r.status}`);
-        return (await r.json()) as { awaiting: Awaiting[] };
+        return (await r.json()) as { awaiting: Awaiting[]; truncated?: boolean };
       })
-      .then((d) => live && setState({ k: "loaded", awaiting: d.awaiting ?? [] }))
+      .then(
+        (d) =>
+          live &&
+          setState({
+            k: "loaded",
+            awaiting: d.awaiting ?? [],
+            truncated: d.truncated === true,
+          }),
+      )
       .catch((e: Error) => live && setState({ k: "failed", message: e.message }));
     return () => {
       live = false;
@@ -72,10 +80,17 @@ export function SweepBanner() {
           {state.k === "loading" && "Checking what the sweep left."}
           {state.k === "failed" &&
             `Cannot reach the door (${state.message}), so no count is shown.`}
-          {state.k === "loaded" && scheduled.length === 0 && (
+          {state.k === "loaded" && scheduled.length === 0 && !state.truncated && (
             <>
               Runs on its own at 7am on weekdays, court time. Nothing is waiting on an
               attorney right now.
+            </>
+          )}
+          {state.k === "loaded" && scheduled.length === 0 && state.truncated && (
+            <>
+              Runs on its own at 7am on weekdays, court time. The queue of waiting runs
+              was too long to read in full, so this cannot say whether one is
+              outstanding.
             </>
           )}
           {state.k === "loaded" && scheduled.length > 0 && (

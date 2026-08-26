@@ -53,3 +53,21 @@ describe("SweepBanner", () => {
     expect(container.querySelectorAll("div").length).toBe(before);
   });
 });
+
+describe("SweepBanner truncation", () => {
+  it("does NOT claim nothing is waiting when the list was truncated", async () => {
+    door({ awaiting: [], truncated: true });
+    render(<SweepBanner />);
+    await waitFor(() => expect(screen.getByText(/cannot say whether one is/i)).toBeTruthy());
+    // The false claim the pagination bug used to produce.
+    expect(screen.queryByText(/Nothing is waiting on an attorney right now/i)).toBeNull();
+  });
+
+  it("still says nothing is waiting when the list was complete", async () => {
+    door({ awaiting: [], truncated: false });
+    render(<SweepBanner />);
+    await waitFor(() =>
+      expect(screen.getByText(/Nothing is waiting on an attorney right now/i)).toBeTruthy(),
+    );
+  });
+});

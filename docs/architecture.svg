@@ -132,16 +132,17 @@
   <text x="106" y="1266" fill="#8a8a8a" font-size="17">Queue changed underneath: STATE CHANGED DURING APPROVAL.</text>
 
   <rect x="820" y="982" width="700" height="300" rx="6" fill="#1d1d1d" stroke="#3a3a3a" stroke-width="2"/>
-  <text x="846" y="1024" fill="#faf6f0" font-size="24" letter-spacing="2">WHEN NOBODY DECIDES</text>
-  <text x="846" y="1062" fill="#8a8a8a" font-size="18">Silence is not safe. These are the cases closest to a</text>
-  <text x="846" y="1086" fill="#8a8a8a" font-size="18">default judgment, so dropping them is the worse failure.</text>
+  <text x="846" y="1024" fill="#faf6f0" font-size="24" letter-spacing="2">WHEN THE ANSWER IS NOT A DECISION</text>
+  <text x="846" y="1062" fill="#8a8a8a" font-size="18">An unclear reply is refused rather than taken as consent.</text>
+  <text x="846" y="1086" fill="#8a8a8a" font-size="18">Dropping the work would be the worse failure, so it is kept.</text>
 
   <text x="846" y="1130" fill="#e8c547" font-size="19">A deterministic floor commits them for later review,</text>
   <text x="846" y="1156" fill="#e8c547" font-size="19">under floor authority, never under a forged approval.</text>
 
   <text x="846" y="1200" fill="#b3271e" font-size="20">and the run still reports FAILURE</text>
   <text x="846" y="1230" fill="#8a8a8a" font-size="17">because nobody actually decided. The work is preserved.</text>
-  <text x="846" y="1254" fill="#8a8a8a" font-size="17">The authority is not.</text>
+  <text x="846" y="1254" fill="#8a8a8a" font-size="17">The authority is not. A run nobody answers AT ALL stays</text>
+  <text x="846" y="1276" fill="#8a8a8a" font-size="17">awaiting, and is listed by GET /api/awaiting.</text>
 
   <!-- ============ BAND 6 : the human ============ -->
   <rect x="1560" y="982" width="760" height="300" rx="6" fill="#1d1d1d" stroke="#3a3a3a" stroke-width="2"/>

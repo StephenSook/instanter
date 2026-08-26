@@ -92,6 +92,10 @@ MAX_RUNS_PER_DAY = int(os.environ.get("MAX_RUNS_PER_DAY", "200"))
 # mean a busy day of visitors silently cancels the clinic's morning sweep,
 # which is the one run that actually has to happen.
 MAX_SCHEDULED_RUNS_PER_DAY = int(os.environ.get("MAX_SCHEDULED_RUNS_PER_DAY", "2"))
+# Upper bound on rows /api/awaiting will walk. It exists to bound the work, and
+# when it bites the response says `truncated: true` rather than presenting a
+# partial page as the whole list.
+MAX_AWAITING_SCAN = int(os.environ.get("MAX_AWAITING_SCAN", "500"))
 
 _ddb = None
 
@@ -418,27 +422,56 @@ def list_awaiting() -> dict[str, Any]:
     Queried through a sparse index on `status`, so the daily counter rows,
     which carry no status, are absent by construction rather than by filter.
     """
-    result = table().query(
-        IndexName=AWAITING_INDEX,
-        KeyConditionExpression=Key("status").eq("awaiting_attorney"),
-        ScanIndexForward=False,
-        Limit=25,
-    )
-    waiting = []
-    for item in result.get("Items", []):
-        raw = item.get("result")
-        parsed = json.loads(raw) if isinstance(raw, str) else (raw or {})
-        waiting.append(
-            {
-                "run_id": item["run_id"],
-                "origin": item.get("origin", "visitor"),
-                "created_at": int(item.get("created_at", 0)),
-                "cases": len(parsed.get("awaiting") or []),
-            }
-        )
+    # PAGINATE. A single Limit=25 page silently dropped everything after the
+    # 25th row, and the console filters that page for scheduled runs, so 25
+    # newer visitor rows could hide the morning sweep and make the banner say
+    # "nothing is waiting" when something was. A truncated read that produces a
+    # confident absence is the same defect as an errored query reading as a
+    # pass. The cap below bounds the work; it does not hide it.
+    waiting: list[dict[str, Any]] = []
+    scanned = 0
+    start_key: dict[str, Any] | None = None
+    truncated = False
+    while True:
+        kwargs: dict[str, Any] = {
+            "IndexName": AWAITING_INDEX,
+            "KeyConditionExpression": Key("status").eq("awaiting_attorney"),
+            "ScanIndexForward": False,
+            "Limit": 100,
+        }
+        if start_key:
+            kwargs["ExclusiveStartKey"] = start_key
+        result = table().query(**kwargs)
+        for item in result.get("Items", []):
+            scanned += 1
+            raw = item.get("result")
+            try:
+                parsed = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            except (TypeError, ValueError):
+                # A row whose result is unparseable is still owed a decision.
+                # Report it with an unknown case count rather than crashing the
+                # endpoint or dropping it from the list.
+                parsed = {}
+            waiting.append(
+                {
+                    "run_id": item["run_id"],
+                    "origin": item.get("origin", "visitor"),
+                    "created_at": int(item.get("created_at", 0)),
+                    "cases": len(parsed.get("awaiting") or []),
+                }
+            )
+        start_key = result.get("LastEvaluatedKey")
+        if not start_key:
+            break
+        if scanned >= MAX_AWAITING_SCAN:
+            # Bounded, and SAID so, so a client never reads a partial list as a
+            # complete one.
+            truncated = True
+            break
     return {
         "awaiting": waiting,
         "count": len(waiting),
+        "truncated": truncated,
         # Said plainly because it is the product's whole claim: the sweep runs
         # whether or not anyone opened the page, and it stops rather than
         # deciding.
@@ -460,8 +493,17 @@ def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
     body = {"capacity": int(event.get("capacity", 2))}
     response = start_run(body, origin="scheduled")
     payload = json.loads(response["body"])
-    # Returned rather than logged only, so a failed sweep shows up as a failed
-    # Scheduler invocation and can be alarmed on.
+    if response["statusCode"] >= 400:
+        # RAISE, do not return. EventBridge Scheduler invokes Lambda
+        # asynchronously, so a statusCode sitting inside a returned object is
+        # not an invocation failure: the delivery is recorded as a success and
+        # the retry policy never fires. This used to return normally, and the
+        # comment here claimed the opposite of what the code did, which meant a
+        # sweep that never ran looked exactly like a sweep that did.
+        raise RuntimeError(
+            f"scheduled sweep failed: HTTP {response['statusCode']} "
+            f"{payload.get('error') or payload.get('detail') or ''}".strip()
+        )
     return {
         "scheduled": True,
         "statusCode": response["statusCode"],

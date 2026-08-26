@@ -311,12 +311,11 @@ def test_a_scheduled_event_routes_to_the_sweep_and_not_to_http(
 ) -> None:
     """The whole point: the sweep runs without anyone pressing a button."""
     monkeypatch.setattr(door, "RUNTIME_ARN", "")
-    result = door.handler({"instanter_scheduled_sweep": True, "capacity": 2})
-    assert result["scheduled"] is True
-    # No runtime wired here, so it refuses loudly rather than reporting a run
-    # that never happened.
-    assert result["statusCode"] == 503
-    assert result["status"] is None
+    # No runtime wired, so it refuses. It RAISES rather than returning, because
+    # EventBridge invokes Lambda asynchronously and a statusCode inside a
+    # returned object would be recorded as a successful delivery.
+    with pytest.raises(RuntimeError, match="scheduled sweep failed"):
+        door.handler({"instanter_scheduled_sweep": True, "capacity": 2})
 
 
 def test_a_forged_http_request_cannot_reach_the_scheduled_path() -> None:
@@ -372,9 +371,8 @@ def test_the_scheduled_cap_refusal_reports_its_own_cap(
     monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 0)
     monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
 
-    result = door.handler({"instanter_scheduled_sweep": True})
-    assert result["statusCode"] == 429
-    assert result["error"] == "daily_run_cap_reached"
+    with pytest.raises(RuntimeError, match="scheduled sweep failed: HTTP 429"):
+        door.handler({"instanter_scheduled_sweep": True})
 
 
 def test_a_run_records_which_origin_started_it(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -388,7 +386,10 @@ def test_a_run_records_which_origin_started_it(monkeypatch: pytest.MonkeyPatch) 
         raise RuntimeError("no network in tests")
 
     monkeypatch.setattr(boto3, "client", explode)
-    door.handler({"instanter_scheduled_sweep": True})
+    # The invoke fails, so the sweep raises. The ROW must still have been
+    # written first, and must carry its origin.
+    with pytest.raises(RuntimeError, match="scheduled sweep failed"):
+        door.handler({"instanter_scheduled_sweep": True})
     assert fake.puts, "the run row was never written"
     assert fake.puts[0]["origin"] == "scheduled"
 
@@ -459,3 +460,108 @@ def test_a_client_that_cannot_be_built_is_a_502_and_not_a_crash(
     assert status == 502
     assert body["status"] == "failed"
     assert "Invalid endpoint" in body["error"]
+
+
+# --------------------- Codex adversarial review, verified findings
+
+
+class _PagedFakeTable(_KeyedFakeTable):
+    """Returns rows across multiple pages, the way a real query does."""
+
+    def __init__(self, pages: list[list[dict[str, Any]]]) -> None:
+        super().__init__()
+        self.pages = pages
+        self.calls = 0
+
+    def query(self, **kwargs: Any) -> dict[str, Any]:
+        idx = self.calls
+        self.calls += 1
+        items = self.pages[idx] if idx < len(self.pages) else []
+        more = idx + 1 < len(self.pages)
+        out: dict[str, Any] = {"Items": items}
+        if more:
+            out["LastEvaluatedKey"] = {"run_id": f"page{idx}"}
+        return out
+
+
+def _row(run_id: str, origin: str, cases: int = 1) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "origin": origin,
+        "created_at": 1_700_000_000,
+        "result": json.dumps({"awaiting": [{"case_id": f"c{i}"} for i in range(cases)]}),
+    }
+
+
+def test_awaiting_does_not_lose_a_scheduled_run_behind_a_page_of_visitors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The truncation bug, as a test.
+
+    A single 25-row page let newer visitor rows hide the morning sweep, and the
+    console then said nothing was waiting when something was. A truncated read
+    that produces a confident absence is the same defect as an errored query
+    reading as a pass.
+    """
+    visitors = [_row(f"v{i}", "visitor") for i in range(100)]
+    fake = _PagedFakeTable([visitors, [_row("sched1", "scheduled", cases=2)]])
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+
+    status, body = call("/api/awaiting")
+    assert status == 200
+    assert fake.calls == 2, "it must follow LastEvaluatedKey rather than stop at one page"
+    origins = [a["origin"] for a in body["awaiting"]]
+    assert "scheduled" in origins, "the scheduled run was hidden behind a page of visitor runs"
+    assert body["count"] == 101
+
+
+def test_awaiting_says_so_when_it_stops_early(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bounded is fine. Bounded and silent is not."""
+    pages = [[_row(f"v{p}_{i}", "visitor") for i in range(100)] for p in range(9)]
+    fake = _PagedFakeTable(pages)
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "MAX_AWAITING_SCAN", 250)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+
+    _, body = call("/api/awaiting")
+    assert body["truncated"] is True, "a partial list must never present itself as complete"
+
+
+def test_awaiting_reports_a_row_whose_result_is_unparseable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A corrupt row is still a run that owes somebody a decision."""
+    bad = {"run_id": "x1", "origin": "scheduled", "created_at": 1, "result": "{not json"}
+    fake = _PagedFakeTable([[bad]])
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+
+    status, body = call("/api/awaiting")
+    assert status == 200, "an unparseable row must not take the endpoint down"
+    assert body["count"] == 1
+    assert body["awaiting"][0]["cases"] == 0
+
+
+def test_a_failed_scheduled_sweep_raises_rather_than_returning_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """EventBridge invokes Lambda asynchronously.
+
+    A statusCode inside a returned object is NOT an invocation failure, so a
+    sweep that never ran was being recorded as a successful delivery and the
+    retry policy never fired. The code comment claimed the opposite of what the
+    code did.
+    """
+    monkeypatch.setattr(door, "RUNTIME_ARN", "")
+    with pytest.raises(RuntimeError, match="scheduled sweep failed"):
+        door.handler({"instanter_scheduled_sweep": True})
+
+
+def test_a_capped_scheduled_sweep_also_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _KeyedFakeTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 0)
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+    with pytest.raises(RuntimeError, match="scheduled sweep failed"):
+        door.handler({"instanter_scheduled_sweep": True})
