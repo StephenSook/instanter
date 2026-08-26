@@ -3,7 +3,7 @@ module.exports = {
   type: "widget",
   name: "InstanterWidget",
   displayName: "Instanter",
-  deploymentTarget: "16.2",
+  deploymentTarget: "16.4",
   bundleIdentifier: ".widget",
   frameworks: ["SwiftUI", "WidgetKit", "ActivityKit"],
   entitlements: {
