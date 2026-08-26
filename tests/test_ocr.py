@@ -53,6 +53,19 @@ def test_ocr_refuses_a_missing_service_date() -> None:
     assert out["error"] == "service_date_missing"
 
 
+def test_ocr_example_watermark_does_not_block_a_transcribed_date() -> None:
+    out = deadline_from_extract(
+        {
+            "service_date": "2026-08-08",
+            "service_method": "personal",
+            "refused": True,
+            "reason": "EXAMPLE DATA",
+        }
+    )
+    assert out["computed_deadline"] == "2026-08-17"
+    assert "error" not in out
+
+
 def test_ocr_unknown_method_still_uses_the_engine() -> None:
     out = deadline_from_extract(
         {

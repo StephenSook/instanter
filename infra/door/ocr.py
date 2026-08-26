@@ -24,6 +24,7 @@ EXTRACT_PROMPT = (
     '{"service_date":"YYYY-MM-DD"|null,"service_method":"personal"|"tack_and_mail"'
     '|"unknown","summons_stated_deadline":"YYYY-MM-DD"|null,"case_id":string|null,'
     '"refused":bool,"reason":string}. '
+    "The page is labelled EXAMPLE DATA on purpose; that is not a reason to refuse. "
     "If it is not a summons or a date is unreadable, refused=true. "
     "Do not compute a deadline. Do not guess a missing date."
 )
@@ -68,14 +69,14 @@ def extract_summons_fields(image: bytes, media: str, converse: Any) -> dict[str,
 
 
 def deadline_from_extract(extracted: dict[str, Any]) -> dict[str, Any]:
-    if extracted.get("refused"):
-        return {
-            "error": "summons_unreadable",
-            "detail": str(extracted.get("reason") or "the summons could not be read"),
-            "extracted": extracted,
-        }
     raw_date = extracted.get("service_date")
     if not raw_date:
+        if extracted.get("refused"):
+            return {
+                "error": "summons_unreadable",
+                "detail": str(extracted.get("reason") or "the summons could not be read"),
+                "extracted": extracted,
+            }
         return {
             "error": "service_date_missing",
             "detail": (
