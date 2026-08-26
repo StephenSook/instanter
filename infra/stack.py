@@ -157,7 +157,18 @@ class JudgeDoorStack(cdk.Stack):
                 # This marker is what the handler routes on. It cannot arrive
                 # over HTTP: a Function URL event always carries rawPath, and a
                 # POST body is a string rather than merged into the event.
-                input=json.dumps({"instanter_scheduled_sweep": True, "capacity": 2}),
+                input=json.dumps(
+                    {
+                        "instanter_scheduled_sweep": True,
+                        "capacity": 2,
+                        # Scheduler substitutes its own occurrence time here.
+                        # It does two jobs: the sweep triages the day it was
+                        # FOR rather than the day a retry happened, and it is
+                        # the idempotency key that stops an at-least-once
+                        # redelivery becoming a second paid run.
+                        "scheduled_time": "<aws.scheduler.scheduled-time>",
+                    }
+                ),
                 retry_policy=scheduler.CfnSchedule.RetryPolicyProperty(
                     # One retry, not the default 185. A sweep that failed twice
                     # should page a human, not spend the day retrying a paid

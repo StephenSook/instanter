@@ -311,6 +311,7 @@ def test_a_scheduled_event_routes_to_the_sweep_and_not_to_http(
 ) -> None:
     """The whole point: the sweep runs without anyone pressing a button."""
     monkeypatch.setattr(door, "RUNTIME_ARN", "")
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
     # No runtime wired, so it refuses. It RAISES rather than returning, because
     # EventBridge invokes Lambda asynchronously and a statusCode inside a
     # returned object would be recorded as a successful delivery.
@@ -386,12 +387,14 @@ def test_a_run_records_which_origin_started_it(monkeypatch: pytest.MonkeyPatch) 
         raise RuntimeError("no network in tests")
 
     monkeypatch.setattr(boto3, "client", explode)
-    # The invoke fails, so the sweep raises. The ROW must still have been
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    # The invoke fails, so the sweep raises. The RUN row must still have been
     # written first, and must carry its origin.
     with pytest.raises(RuntimeError, match="scheduled sweep failed"):
         door.handler({"instanter_scheduled_sweep": True})
-    assert fake.puts, "the run row was never written"
-    assert fake.puts[0]["origin"] == "scheduled"
+    runs = [i for i in fake.puts if not str(i["run_id"]).startswith("__")]
+    assert runs, "the run row was never written"
+    assert runs[0]["origin"] == "scheduled"
 
 
 def test_awaiting_lists_runs_that_stopped_for_an_attorney(
@@ -554,6 +557,7 @@ def test_a_failed_scheduled_sweep_raises_rather_than_returning_success(
     code did.
     """
     monkeypatch.setattr(door, "RUNTIME_ARN", "")
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
     with pytest.raises(RuntimeError, match="scheduled sweep failed"):
         door.handler({"instanter_scheduled_sweep": True})
 
@@ -562,6 +566,7 @@ def test_a_capped_scheduled_sweep_also_raises(monkeypatch: pytest.MonkeyPatch) -
     fake = _KeyedFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 0)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
     monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
     with pytest.raises(RuntimeError, match="scheduled sweep failed"):
         door.handler({"instanter_scheduled_sweep": True})
@@ -588,3 +593,121 @@ def test_awaiting_does_not_publish_run_ids_a_stranger_could_decide(
     assert all("run_id" not in row for row in body["awaiting"])
     # The count still works, which is all the console ever needed.
     assert body["awaiting"][0]["cases"] == 2
+
+
+def test_a_duplicate_scheduler_delivery_spends_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """EventBridge Scheduler delivers AT LEAST once.
+
+    Without an occurrence key a redelivery minted a fresh run_id and became a
+    second paid model run, and the scheduled cap of 2 permitted exactly that
+    rather than deduplicating it.
+    """
+
+    class _OnceTable(_KeyedFakeTable):
+        def __init__(self) -> None:
+            super().__init__()
+            self.claimed: set[str] = set()
+
+        def put_item(self, **kwargs: Any) -> dict[str, Any]:
+            key = kwargs["Item"]["run_id"]
+            if "ConditionExpression" in kwargs:
+                if key in self.claimed:
+                    raise RuntimeError("ConditionalCheckFailedException")
+                self.claimed.add(key)
+            return super().put_item(**kwargs)
+
+    fake = _OnceTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 5)
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+
+    def explode(*_a: Any, **_k: Any) -> None:
+        raise AssertionError("a duplicate delivery must not reach the model")
+
+    event = {"instanter_scheduled_sweep": True, "scheduled_time": "2026-09-09T11:00:00Z"}
+
+    # First delivery claims the occurrence, then fails at the model (no network).
+    def _no_net(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("no net")
+
+    monkeypatch.setattr(boto3, "client", _no_net)
+    with pytest.raises(RuntimeError):
+        door.handler(dict(event))
+
+    # Second delivery of the SAME occurrence must not construct a client at all.
+    monkeypatch.setattr(boto3, "client", explode)
+    result = door.handler(dict(event))
+    assert result["duplicate"] is True
+    assert result["statusCode"] == 200
+
+
+def test_the_scheduled_sweep_triages_the_court_local_day_not_the_frozen_demo_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The frozen-date finding, as a test.
+
+    The scheduled path used to pass only capacity, so the agent fell back to the
+    corpus's demo_run_date and every morning re-triaged the same day. A case was
+    therefore ranked by a stale distance to its deadline.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_start(
+        body: dict[str, Any], origin: str = "visitor", run_date: str | None = None
+    ) -> dict[str, Any]:
+        captured["origin"] = origin
+        captured["run_date"] = run_date
+        return {"statusCode": 202, "body": json.dumps({"run_id": "r1", "status": "complete"})}
+
+    monkeypatch.setattr(door, "start_run", fake_start)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+
+    # 11:00 UTC on 2026-09-09 is 07:00 in America/New_York, the same court day.
+    door.handler({"instanter_scheduled_sweep": True, "scheduled_time": "2026-09-09T11:00:00Z"})
+    assert captured["run_date"] == "2026-09-09"
+    assert captured["origin"] == "scheduled"
+
+
+def test_a_late_utc_occurrence_still_resolves_to_the_right_court_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """01:00 UTC is still the PREVIOUS evening in Eastern time.
+
+    Counting the day in UTC would put this sweep on the wrong court date, which
+    is the whole reason the schedule carries a named timezone.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_start(
+        body: dict[str, Any], origin: str = "visitor", run_date: str | None = None
+    ) -> dict[str, Any]:
+        captured["run_date"] = run_date
+        return {"statusCode": 202, "body": json.dumps({"run_id": "r1", "status": "complete"})}
+
+    monkeypatch.setattr(door, "start_run", fake_start)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    door.handler({"instanter_scheduled_sweep": True, "scheduled_time": "2026-09-10T01:00:00Z"})
+    assert captured["run_date"] == "2026-09-09", "UTC date would have said the 10th"
+
+
+def test_an_unsubstituted_scheduler_token_is_not_parsed_as_a_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the target was configured without the token, the literal comes back."""
+    captured: dict[str, Any] = {}
+
+    def fake_start(
+        body: dict[str, Any], origin: str = "visitor", run_date: str | None = None
+    ) -> dict[str, Any]:
+        captured["run_date"] = run_date
+        return {"statusCode": 202, "body": json.dumps({"run_id": "r1", "status": "complete"})}
+
+    monkeypatch.setattr(door, "start_run", fake_start)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    door.handler(
+        {"instanter_scheduled_sweep": True, "scheduled_time": "<aws.scheduler.scheduled-time>"}
+    )
+    # Falls back to today in court time rather than crashing or sending junk.
+    assert captured["run_date"] and captured["run_date"][0].isdigit()

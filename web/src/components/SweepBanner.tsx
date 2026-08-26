@@ -15,7 +15,13 @@ import { useEffect, useState } from "react";
  *
  * Nothing here is invented. If the door cannot be reached, this says so and
  * shows no count, because a decision surface that fabricates a number is worse
- * than one that admits it is blind.
+ * than one that admits it is blind. If the list came back truncated it declines
+ * to claim that nothing is waiting, because a partial read is not an absence.
+ *
+ * It deliberately offers no way to ANSWER a scheduled run. /api/awaiting does
+ * not publish run ids, precisely so a stranger cannot approve the clinic's
+ * morning sweep, and this line says that plainly rather than looking like a
+ * button somebody forgot to build.
  */
 
 type Awaiting = {
@@ -100,7 +106,8 @@ export function SweepBanner() {
               </strong>{" "}
               waiting on an attorney, from a sweep that ran with nobody watching
               {scheduled[0].created_at ? ` ${when(scheduled[0].created_at)}` : ""}. Nothing
-              in it is committed until someone answers.
+              in it is committed until someone answers, and answering is the licensed
+              attorney's own action, so it does not happen from this public page.
             </>
           )}
         </span>

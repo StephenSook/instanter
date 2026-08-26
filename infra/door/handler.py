@@ -28,9 +28,10 @@ import json
 import os
 import time
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -96,6 +97,9 @@ MAX_SCHEDULED_RUNS_PER_DAY = int(os.environ.get("MAX_SCHEDULED_RUNS_PER_DAY", "2
 # when it bites the response says `truncated: true` rather than presenting a
 # partial page as the whole list.
 MAX_AWAITING_SCAN = int(os.environ.get("MAX_AWAITING_SCAN", "500"))
+# Deadlines are counted in the court's calendar, not in UTC. Fulton County
+# State Court sits here, and a named zone follows daylight saving on its own.
+COURT_TZ = ZoneInfo(os.environ.get("COURT_TZ", "America/New_York"))
 
 _ddb = None
 
@@ -267,7 +271,9 @@ def _runtime_session_id() -> str:
     return f"door-{uuid.uuid4().hex}-{uuid.uuid4().hex[:8]}"
 
 
-def start_run(body: dict[str, Any], origin: str = "visitor") -> dict[str, Any]:
+def start_run(
+    body: dict[str, Any], origin: str = "visitor", run_date: str | None = None
+) -> dict[str, Any]:
     if not RUNTIME_ARN:
         # Loud, not silent. A door that pretends to start a run it cannot start
         # is the same defect as an interrupt with no persisted state.
@@ -313,10 +319,20 @@ def start_run(body: dict[str, Any], origin: str = "visitor") -> dict[str, Any]:
             "created_at": now,
             "expires_at": now + 7 * 24 * 3600,
             "capacity": int(body.get("capacity", 2)),
+            **({"run_date": run_date} if run_date else {}),
         }
     )
 
-    payload = {"action": "start", "run_id": run_id, "capacity": int(body.get("capacity", 2))}
+    payload: dict[str, Any] = {
+        "action": "start",
+        "run_id": run_id,
+        "capacity": int(body.get("capacity", 2)),
+    }
+    if run_date:
+        # Threaded through explicitly. Without it the agent falls back to the
+        # corpus's frozen demo_run_date, so every morning would re-triage the
+        # same day and rank a case by a stale distance to its deadline.
+        payload["run_date"] = run_date
     try:
         # Constructed INSIDE the try. It was outside, which meant a client that
         # failed to build (bad region, missing credentials, a botocore data
@@ -488,6 +504,48 @@ def list_awaiting() -> dict[str, Any]:
     }
 
 
+def claim_occurrence(occurrence: str) -> bool:
+    """Claim one scheduled occurrence exactly once, before spending anything.
+
+    EventBridge Scheduler delivers AT LEAST once, and asynchronous Lambda
+    delivery can repeat an event even after it succeeded. Without this, a
+    duplicate delivery minted a fresh run_id and became a second paid model run
+    and a second awaiting row, and the scheduled cap of 2 permitted exactly
+    that rather than deduplicating it.
+
+    A conditional write is the whole mechanism: the second writer loses.
+    """
+    try:
+        table().put_item(
+            Item={
+                "run_id": f"__occurrence__{occurrence}",
+                "claimed_at": int(time.time()),
+                "expires_at": int(time.time()) + 3 * 24 * 3600,
+            },
+            ConditionExpression="attribute_not_exists(run_id)",
+        )
+        return True
+    except Exception as exc:
+        if "ConditionalCheckFailed" in type(exc).__name__ or "ConditionalCheckFailed" in str(exc):
+            return False
+        raise
+
+
+def court_today(scheduled_time: str | None) -> str:
+    """The date the court is actually on, as an ISO string.
+
+    Prefers the scheduler's own occurrence time so a retry re-triages the day it
+    was FOR rather than the day it retried on. Falls back to now.
+    """
+    if scheduled_time:
+        try:
+            stamp = datetime.fromisoformat(scheduled_time.replace("Z", "+00:00"))
+            return stamp.astimezone(COURT_TZ).date().isoformat()
+        except ValueError:
+            pass
+    return datetime.now(COURT_TZ).date().isoformat()
+
+
 def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
     """The 7am sweep, fired by EventBridge Scheduler rather than by a click.
 
@@ -496,8 +554,25 @@ def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
     thing the pitch says nobody has time to do. It ends the same way a visitor
     run does: at the attorney interrupt, with nothing committed.
     """
+    raw_time = event.get("scheduled_time")
+    # The literal token comes back unsubstituted if the target was configured
+    # without it; treat that as absent rather than parsing it as a date.
+    scheduled_time = None if not raw_time or raw_time.startswith("<") else str(raw_time)
+    occurrence = scheduled_time or datetime.now(COURT_TZ).strftime("%Y-%m-%dT%H")
+
+    if not claim_occurrence(occurrence):
+        # Already ran for this occurrence. Report it and spend nothing.
+        return {
+            "scheduled": True,
+            "statusCode": 200,
+            "duplicate": True,
+            "occurrence": occurrence,
+            "detail": "this occurrence already ran; at-least-once delivery repeated it",
+        }
+
+    run_date = court_today(scheduled_time)
     body = {"capacity": int(event.get("capacity", 2))}
-    response = start_run(body, origin="scheduled")
+    response = start_run(body, origin="scheduled", run_date=run_date)
     payload = json.loads(response["body"])
     if response["statusCode"] >= 400:
         # RAISE, do not return. EventBridge Scheduler invokes Lambda
@@ -513,6 +588,9 @@ def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
     return {
         "scheduled": True,
         "statusCode": response["statusCode"],
+        "duplicate": False,
+        "occurrence": occurrence,
+        "run_date": run_date,
         "run_id": payload.get("run_id"),
         "status": payload.get("status"),
         "error": payload.get("error"),
