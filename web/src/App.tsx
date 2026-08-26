@@ -3,6 +3,7 @@ import Lenis from "lenis";
 import gsap from "gsap";
 import { Cabinet } from "./components/Cabinet";
 import { LiveProof } from "./components/LiveProof";
+import { SweepBanner } from "./components/SweepBanner";
 import { RunPanel } from "./components/RunPanel";
 import { Packet } from "./components/Packet";
 import { loadQueue, type QueueSnapshot } from "./data";
@@ -68,6 +69,7 @@ export default function App() {
       </header>
 
       <LiveProof />
+      <SweepBanner />
 
       <main>
         {error && (
