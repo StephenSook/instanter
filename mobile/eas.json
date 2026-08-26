@@ -24,6 +24,11 @@
         "buildType": "app-bundle"
       },
       "credentialsSource": "local"
+    },
+    "ios-live-activity": {
+      "autoIncrement": true,
+      "credentialsSource": "remote",
+      "ios": {}
     }
   },
   "submit": {
