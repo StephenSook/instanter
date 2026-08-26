@@ -11,6 +11,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import date
+from typing import Any
 
 from agent.audit import AuditSink
 from agent.models import EscalationRationale, ExtractedObservations
@@ -73,6 +74,9 @@ class RunContext:
     # carry another. Reuse would replay stale decisions and committed ids
     # under the same run_id; the runner enforces this at entry.
     started: bool = False
+    # Custom span records for the run receipt. Observability lives here so a
+    # console can print the graph's own spans without scraping X-Ray.
+    span_log: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # The run id scopes durable idempotency ((run_id, case_id)

@@ -120,6 +120,56 @@ note "5. a deep link reaches the console rather than an S3 404"
 code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$DOMAIN/some/deep/link")
 if [ "$code" = "200" ]; then pass "SPA rewrite works"; else fail "deep link -> $code"; fi
 
+note "6. Web Push public key is on the door"
+code=$(curl -s -o /tmp/door-vapid.json -w '%{http_code}' --max-time 30 "$DOMAIN/api/push/vapid")
+if [ "$code" = "200" ] && python3 -c 'import json; assert json.load(open("/tmp/door-vapid.json")).get("publicKey")'; then
+  pass "GET /api/push/vapid returns a publicKey"
+else
+  fail "GET /api/push/vapid -> $code"
+fi
+
+note "7. the service worker and manifest are on the origin"
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$DOMAIN/sw.js")
+if [ "$code" = "200" ]; then pass "GET /sw.js -> 200"; else fail "GET /sw.js -> $code"; fi
+code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$DOMAIN/manifest.webmanifest")
+if [ "$code" = "200" ]; then pass "GET /manifest.webmanifest -> 200"; else fail "GET /manifest.webmanifest -> $code"; fi
+
+note "8. OCR: Nova transcribes the sample summons, the engine computes 2026-08-17"
+SAMPLE="$(cd "$(dirname "$0")/.." && pwd)/web/public/sample-summons.jpg"
+if [ ! -f "$SAMPLE" ]; then
+  fail "sample summons missing at $SAMPLE"
+else
+  python3 - "$DOMAIN" "$SAMPLE" <<'PY'
+import json, sys, base64, urllib.request, urllib.error
+domain, path = sys.argv[1], sys.argv[2]
+raw = base64.b64encode(open(path, "rb").read()).decode()
+req = urllib.request.Request(
+    f"{domain}/api/ocr",
+    data=json.dumps({"image_b64": raw, "media_type": "image/jpeg"}).encode(),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req, timeout=90) as res:
+        body = json.loads(res.read())
+        status = res.status
+except urllib.error.HTTPError as exc:
+    body = json.loads(exc.read() or b"{}")
+    status = exc.code
+    print(f"  FAIL  POST /api/ocr -> {status} {body.get('error')}")
+    sys.exit(1)
+if body.get("computed_deadline") != "2026-08-17":
+    print(f"  FAIL  OCR deadline {body.get('computed_deadline')!r}, expected 2026-08-17")
+    sys.exit(1)
+if body.get("extracted", {}).get("service_date") != "2026-08-08":
+    print(f"  FAIL  OCR service_date {body.get('extracted')}")
+    sys.exit(1)
+print("  PASS  sample summons 2026-08-08 -> engine 2026-08-17")
+sys.exit(0)
+PY
+  if [ $? -ne 0 ]; then fails=$((fails + 1)); fi
+fi
+
 note "----"
 if [ "$fails" -eq 0 ]; then
   echo "ALL CHECKS PASSED"

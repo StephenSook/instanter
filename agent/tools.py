@@ -24,6 +24,7 @@ from agent.models import (
     reject_model_numerics,
 )
 from agent.run_context import RunContext
+from agent.spans import instanter_span
 from agent.store import (
     EscalationRecord,
     IntakeParseError,
@@ -274,7 +275,8 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                     )
                 )
                 continue
-            result = compute_deadline(case_input, rule)
+            with instanter_span(ctx, "instanter.compute_deadline", case_id=record.case_id):
+                result = compute_deadline(case_input, rule)
             ctx.deadlines[record.case_id] = result
             ctx.audit.append(
                 AuditEvent(
@@ -322,7 +324,13 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
                 )
             )
 
-        ctx.decisions = triage_queue(cases, ctx.run_date, ctx.attorney_capacity)
+        with instanter_span(
+            ctx,
+            "instanter.triage_queue",
+            cases=len(cases),
+            capacity=ctx.attorney_capacity,
+        ):
+            ctx.decisions = triage_queue(cases, ctx.run_date, ctx.attorney_capacity)
         ctx.audit.append(
             AuditEvent(
                 kind="queue_ranked",

@@ -17,6 +17,7 @@ from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent, HookProvider,
 
 from agent.audit import AuditEvent
 from agent.run_context import RunContext
+from agent.spans import instanter_span
 
 _GATED_TOOL = "commit_escalations"
 
@@ -244,17 +245,22 @@ class AttorneyApprovalHook(HookProvider):
             }
             for d in self._ctx.interrupt_candidates
         ]
-        response = event.interrupt(
-            "attorney-approval",
-            reason={
-                "question": (
-                    "Approve committing these escalations for review? "
-                    "Reply exactly 'approve', or 'defer: <reason>'."
-                ),
-                "escalations": candidates,
-                "run_id": self._ctx.run_id,
-            },
-        )
+        with instanter_span(
+            self._ctx,
+            "instanter.attorney_interrupt",
+            waiting=len(candidates),
+        ):
+            response = event.interrupt(
+                "attorney-approval",
+                reason={
+                    "question": (
+                        "Approve committing these escalations for review? "
+                        "Reply exactly 'approve', or 'defer: <reason>'."
+                    ),
+                    "escalations": candidates,
+                    "run_id": self._ctx.run_id,
+                },
+            )
         # The attorney's actual words are recorded on EVERY branch:
         # verbatim when bounded, digest-anchored when enormous; the audit
         # trail exists to preserve exactly this.

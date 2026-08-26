@@ -50,7 +50,7 @@ from typing import Any
 import boto3
 from bedrock_agentcore import BedrockAgentCoreApp
 
-from agent.audit import JsonlAuditSink
+from agent.audit import JsonlAuditSink, LockedAuditSink
 from agent.graph import build_triage_graph
 from agent.models import EscalationRationale, ExtractedObservations
 from agent.run_context import RunContext
@@ -60,6 +60,18 @@ from agent.tools import build_tools
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 STATE_BUCKET = os.environ.get("STATE_BUCKET", "")
+AUDIT_LOCK_BUCKET = os.environ.get("AUDIT_LOCK_BUCKET", "")
+os.environ.setdefault("OTEL_SERVICE_NAME", "instanter")
+
+try:
+    from strands.telemetry import StrandsTelemetry
+
+    StrandsTelemetry().setup_otlp_exporter()
+except Exception:
+    # AgentCore injects an OTLP endpoint when Observability is on. A missing
+    # exporter must not prevent a sweep; custom instanter.* spans still
+    # record on the audit trail.
+    pass
 WORK = Path("/tmp/instanter-runs")  # the runtime's writable scratch
 SEED = Path(__file__).parent / "seed" / "synthetic_intake.json"
 SIDECAR = "ctx_state.json"
@@ -154,6 +166,12 @@ def load_sidecar(ctx: RunContext) -> bool:
 def build_context(run_id: str, run_date: date, capacity: int) -> RunContext:
     directory = _run_dir(run_id)
     directory.mkdir(parents=True, exist_ok=True)
+    audit_path = directory / "audit.jsonl"
+    audit: JsonlAuditSink | LockedAuditSink
+    if AUDIT_LOCK_BUCKET:
+        audit = LockedAuditSink(audit_path, AUDIT_LOCK_BUCKET)
+    else:
+        audit = JsonlAuditSink(audit_path)
     return RunContext(
         run_date=run_date,
         attorney_capacity=capacity,
@@ -161,7 +179,7 @@ def build_context(run_id: str, run_date: date, capacity: int) -> RunContext:
             intake_path=SEED,
             escalations_path=directory / "escalations.jsonl",
         ),
-        audit=JsonlAuditSink(directory / "audit.jsonl"),
+        audit=audit,
         run_id=run_id,
     )
 
@@ -209,10 +227,11 @@ def describe_interrupt(result: Any, ctx: RunContext) -> dict[str, Any]:
         ],
         "total_cases": len(ctx.records),
         "refused": sorted(ctx.refused_cases),
+        "spans": list(ctx.span_log),
     }
 
 
-def report_dict(report: Any) -> dict[str, Any]:
+def report_dict(report: Any, spans: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     return {
         "interrupted": False,
         "run_id": report.run_id,
@@ -227,6 +246,7 @@ def report_dict(report: Any) -> dict[str, Any]:
         "refused": list(report.refused),
         "missing_memos": list(report.missing_memos),
         "succeeded": report.succeeded,
+        "spans": list(spans or []),
     }
 
 
@@ -268,7 +288,7 @@ def invoke(payload: dict[str, Any], context: Any = None) -> dict[str, Any]:
         report = _finish_live(ctx, str(result.status), "")
         save_sidecar(ctx)
         persist(run_id)
-        return report_dict(report)
+        return report_dict(report, ctx.span_log)
 
     if action == "resume":
         restored = hydrate(run_id)
@@ -296,7 +316,7 @@ def invoke(payload: dict[str, Any], context: Any = None) -> dict[str, Any]:
         report = _finish_live(ctx, graph_status, model_error)
         save_sidecar(ctx)
         persist(run_id)
-        return report_dict(report)
+        return report_dict(report, ctx.span_log)
 
     return {"error": "unknown_action", "action": action}
 

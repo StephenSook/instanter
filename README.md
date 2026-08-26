@@ -11,6 +11,7 @@ A background triage agent for eviction-defense clinics. It watches a clinic's in
 A three-minute walk for a judge: **<https://d2ew2t4uldglcr.cloudfront.net/judge>**.
 The 4 of 46 as lists you can count: **<https://d2ew2t4uldglcr.cloudfront.net/evidence>**.
 The filing cabinet, recomputed on this request: **<https://d2ew2t4uldglcr.cloudfront.net/api/queue>**.
+Photograph a summons: **<https://d2ew2t4uldglcr.cloudfront.net/#ocr>**. Nova Pro transcribes the printed service date; the engine computes the last day.
 
 **<https://d2ew2t4uldglcr.cloudfront.net/api/stats>** recomputes every answer deadline in the corpus on each request and reports what it found. Nothing there is cached or stored, so the numbers below are measured while you read them:
 
@@ -56,7 +57,7 @@ The APK is a release asset rather than a build-service URL on purpose: build-ser
 
 Under active build for the Agents for Humans Hackathon (submission window Aug 10 to Sep 14, 2026). This README grows with the code; nothing is claimed here before it ships.
 
-Shipped and reachable today: the deterministic deadline engine, the triage agent with its attorney-approval interrupt on AgentCore Runtime, the operator console, and the public door above.
+Shipped and reachable today: the deterministic deadline engine, the triage agent with its attorney-approval interrupt on AgentCore Runtime, the operator console, the public door above, summons OCR (`POST /api/ocr`), Web Push on a real attorney interrupt (`GET /api/push/vapid`), custom `instanter.*` spans on the run receipt, and S3 Object Lock (Compliance, 30 days) on the audit trail. The iOS app starts a count-only Live Activity at the interrupt; the widget target ships in this repo. A TestFlight binary that includes the widget follows the next EAS iOS submit.
 
 ## Why
 

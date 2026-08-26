@@ -26,6 +26,7 @@ if str(DOOR) not in sys.path:
     sys.path.insert(0, str(DOOR))
 
 import handler as door  # noqa: E402
+import push as push_mod  # noqa: E402
 
 
 def event(
@@ -842,3 +843,53 @@ def test_queue_flag_count_matches_stats() -> None:
     flagged = sum(1 for c in queue["cases"] if c.get("flags"))
     assert flagged == stats["computation"]["cases_carrying_a_flag"]
     assert flagged == queue["counts"]["flagged"]
+
+
+def test_ocr_uses_the_engine_after_a_transcription(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_converse(**_kwargs: object) -> dict[str, object]:
+        return {
+            "output": {
+                "message": {
+                    "content": [
+                        {
+                            "text": (
+                                '{"service_date":"2026-08-08","service_method":"personal",'
+                                '"summons_stated_deadline":null,"case_id":"EX",'
+                                '"refused":false,"reason":""}'
+                            )
+                        }
+                    ]
+                }
+            }
+        }
+
+    monkeypatch.setattr(door, "claim_daily_run_slot", lambda _origin="visitor": (True, 0))
+    monkeypatch.setattr(
+        boto3, "client", lambda *a, **k: type("C", (), {"converse": staticmethod(fake_converse)})()
+    )
+    import base64
+
+    status, body = call(
+        "/api/ocr",
+        method="POST",
+        body=json.dumps(
+            {"image_b64": base64.b64encode(b"not-a-real-png").decode(), "media_type": "image/png"}
+        ),
+    )
+    assert status == 200
+    assert body["computed_deadline"] == "2026-08-17"
+    assert body["extracted"]["service_date"] == "2026-08-08"
+
+
+def test_push_vapid_is_loud_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(push_mod, "VAPID_PUBLIC_KEY", "")
+    status, body = call("/api/push/vapid")
+    assert status == 503
+    assert body["error"] == "push_not_configured"
+
+
+def test_push_vapid_returns_the_public_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(push_mod, "VAPID_PUBLIC_KEY", "BK_test_public")
+    status, body = call("/api/push/vapid")
+    assert status == 200
+    assert body["publicKey"] == "BK_test_public"

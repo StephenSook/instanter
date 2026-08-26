@@ -62,6 +62,12 @@ const STEPS: { n: string; title: string; body: string; href: string; external?: 
   },
   {
     n: "09",
+    title: "Photograph a summons",
+    body: "Nova Pro transcribes the printed service date. The engine computes the last day. A guessed date is a refusal.",
+    href: "/#ocr",
+  },
+  {
+    n: "10",
     title: "The statute on paper",
     body: "Every roll row, the summons-controlled date, and the citations. Linger here if you do not want to run a sweep.",
     href: "/evidence",

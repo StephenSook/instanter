@@ -72,6 +72,8 @@ def main() -> int:
         BUILD / "agent" / "runner.py",
         BUILD / "agent" / "hooks.py",
         BUILD / "agent" / "tools.py",
+        BUILD / "agent" / "spans.py",
+        BUILD / "agent" / "audit.py",
         BUILD / "engine" / "deadline.py",
         BUILD / "seed" / "synthetic_intake.json",
     ]

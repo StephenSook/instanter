@@ -17,6 +17,11 @@ Four endpoints, and only one of them is the point:
 * ``GET  /api/queue``           the filing cabinet, recomputed on this request
                                 from the engine plus the triage ladder. Not a
                                 stored snapshot. Never capped.
+* ``GET  /api/push/vapid``      Web Push public key. Subscribe from the console.
+* ``POST /api/push/subscribe``  store a push subscription. Pings fire only when
+                                a sweep actually stops for an attorney.
+* ``POST /api/ocr``             photograph a summons; Nova Pro transcribes
+                                printed fields; the engine computes the deadline.
 * ``POST /api/run``             start a triage sweep on the deployed agent.
 * ``GET  /api/run/{id}``        poll it. The door polls because a managed Python
                                 Lambda cannot stream (ADR-0006).
@@ -30,6 +35,7 @@ is watching the product work rather than reading a number someone typed.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -40,6 +46,9 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import boto3
+import lock as door_lock
+import ocr as door_ocr
+import push as door_push
 from boto3.dynamodb.conditions import Key
 
 from agent.triage import TriageCase, triage_queue
@@ -487,6 +496,11 @@ def attach_steps(result: dict[str, Any]) -> dict[str, Any]:
     seq += 1
     steps.append({"seq": seq, "kind": "rank", "detail": "queue ranked"})
     seq += 1
+    for custom in result.get("spans") or []:
+        name = custom.get("name") if isinstance(custom, dict) else None
+        if name:
+            steps.append({"seq": seq, "kind": "span", "detail": str(name)})
+            seq += 1
     if result.get("interrupted"):
         waiting = result.get("awaiting") or []
         steps.append(
@@ -607,6 +621,23 @@ def start_run(
         ExpressionAttributeNames={"#s": "status", "#r": "result"},
         ExpressionAttributeValues={":s": status, ":r": json.dumps(result, default=str)},
     )
+    try:
+        door_lock.lock_record(
+            "sweep_interrupted" if status == "awaiting_attorney" else "sweep_complete",
+            run_id,
+            {"status": status, "interrupted": bool(result.get("interrupted"))},
+        )
+    except Exception as exc:
+        result = dict(result)
+        result["audit_lock_error"] = str(exc)[:200]
+    if status == "awaiting_attorney" and os.environ.get("PUSH_TABLE"):
+        sent = 0
+        with contextlib.suppress(Exception):
+            sent = door_push.notify_interrupt(
+                boto3.resource("dynamodb", region_name=REGION).Table(os.environ["PUSH_TABLE"])
+            )
+        result = dict(result)
+        result["push_sent"] = sent
     return _json(202, {"run_id": run_id, "status": status, "result": result})
 
 
@@ -668,6 +699,14 @@ def decide(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
             ":a": answer[:2000],
         },
     )
+    kind = "attorney_decision"
+    lowered = answer.lower().strip()
+    if lowered.startswith("approve"):
+        kind = "attorney_approved"
+    elif lowered.startswith("defer"):
+        kind = "attorney_deferred"
+    with contextlib.suppress(Exception):
+        door_lock.lock_record(kind, run_id, {"status": "resolved"})
     return _json(200, {"run_id": run_id, "status": "resolved", "result": result})
 
 
@@ -884,6 +923,50 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
         return what_if_from_event(event, body)
     if path == "/api/queue" and method == "GET":
         return _json(200, compute_queue())
+    if path == "/api/push/vapid" and method == "GET":
+        key = door_push.public_key()
+        if not key:
+            return _json(
+                503,
+                {
+                    "error": "push_not_configured",
+                    "detail": (
+                        "VAPID_PUBLIC_KEY is unset, so this door cannot accept subscriptions."
+                    ),
+                },
+            )
+        return _json(200, {"publicKey": key})
+    if path == "/api/push/subscribe" and method == "POST":
+        if not os.environ.get("PUSH_TABLE"):
+            return _json(503, {"error": "push_not_configured"})
+        push_tbl = boto3.resource("dynamodb", region_name=REGION).Table(os.environ["PUSH_TABLE"])
+        saved = door_push.save_subscription(push_tbl, body)
+        if saved.get("error"):
+            return _json(400, saved)
+        return _json(200, saved)
+    if path == "/api/ocr" and method == "POST":
+        allowed, used_today = claim_daily_run_slot("ocr")
+        if not allowed:
+            return _json(
+                429,
+                {
+                    "error": "daily_run_cap_reached",
+                    "origin": "ocr",
+                    "runs_today": used_today,
+                    "cap": MAX_RUNS_PER_DAY,
+                    "detail": (
+                        "OCR invokes Nova Pro, so it is capped. /api/what-if is never capped."
+                    ),
+                },
+            )
+        converse = boto3.client("bedrock-runtime", region_name=REGION).converse
+        result = door_ocr.handle_ocr(body, converse)
+        if result.get("error") == "ocr_upstream":
+            return _json(502, result)
+        status = 200 if "computed_deadline" in result else 400
+        if result.get("error") == "summons_unreadable":
+            status = 422
+        return _json(status, result)
     if path == "/api/awaiting" and method == "GET":
         return _json(200, list_awaiting())
     if path == "/api/run" and method == "POST":

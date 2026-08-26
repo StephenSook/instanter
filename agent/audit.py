@@ -1,9 +1,9 @@
 """Append-only audit trail: every computation and every human decision.
 
-The UPL rule set requires it, and it feeds the observability story. Phase B
-ships the local JSONL sink; Phase C adds the S3 Object Lock (Compliance
-mode) sink behind the same protocol, which is where immutability becomes a
-property of the storage rather than a promise of the code.
+Local JSONL is the working copy. ``LockedAuditSink`` mirrors each row into
+an S3 Object Lock (Compliance mode) object, so immutability is a property
+of the storage rather than a promise of the code. When the lock bucket is
+unset (tests, a laptop CLI) the JSONL sink is the whole trail.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import fcntl
 import json
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -32,7 +32,7 @@ class AuditSink(Protocol):
 
 class JsonlAuditSink:
     """Local append-only file. One JSON object per line, timestamped at
-    write, never rewritten. The Phase C sink mirrors this shape into S3
+    write, never rewritten. LockedAuditSink mirrors this shape into S3
     Object Lock objects keyed by run and sequence."""
 
     def __init__(self, path: Path) -> None:
@@ -131,3 +131,53 @@ class JsonlAuditSink:
                 "audit trail"
             )
         return rows
+
+
+class LockedAuditSink:
+    """JSONL locally, then one Compliance-mode Object Lock object per row.
+
+    The local file is what the runtime rereads. The locked object is the
+    UPL record: it cannot be overwritten or deleted until the retain-until
+    date. A missing bucket is a configuration error at construction, not a
+    silent skip, because a sink that claims to lock and writes only a
+    local file is the original lie.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        bucket: str,
+        put_object: Any | None = None,
+        retain_days: int = 30,
+    ) -> None:
+        if not bucket:
+            raise ValueError("LockedAuditSink requires a non-empty Object Lock bucket")
+        self._jsonl = JsonlAuditSink(path)
+        self._bucket = bucket
+        self._put_object = put_object
+        self._retain_days = retain_days
+
+    def append(self, event: AuditEvent) -> None:
+        self._jsonl.append(event)
+        row = self._jsonl.read_all()[-1]
+        key = f"audit/{event.run_id}/{int(row['seq']):06d}-{event.kind}.json"
+        from datetime import timedelta
+
+        retain_until = datetime.now(UTC) + timedelta(days=self._retain_days)
+        body = json.dumps(row, default=str).encode("utf-8")
+        put = self._put_object
+        if put is None:
+            import boto3
+
+            put = boto3.client("s3").put_object
+        put(
+            Bucket=self._bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+            ObjectLockMode="COMPLIANCE",
+            ObjectLockRetainUntilDate=retain_until,
+        )
+
+    def read_all(self) -> list[dict[str, Any]]:
+        return self._jsonl.read_all()

@@ -10,6 +10,8 @@ import { FolderLoader } from "./components/FolderLoader";
 import { WhatIfCalendar } from "./components/WhatIfCalendar";
 import { JudgeWalk } from "./components/JudgeWalk";
 import { EvidencePage } from "./components/EvidencePage";
+import { PushToggle } from "./components/PushToggle";
+import { SummonsScan } from "./components/SummonsScan";
 import { loadQueue, type QueueSnapshot } from "./data";
 
 type Route =
@@ -124,6 +126,7 @@ export default function App() {
 
       {route.name !== "judge" && route.name !== "evidence" && <LiveProof />}
       {route.name !== "judge" && route.name !== "evidence" && <SweepBanner />}
+      {route.name !== "judge" && route.name !== "evidence" && <PushToggle />}
 
       <main>
         {error && route.name !== "judge" && route.name !== "evidence" && (
@@ -140,6 +143,7 @@ export default function App() {
         {route.name === "evidence" && <EvidencePage />}
         {route.name === "cabinet" && <RunPanel />}
         {route.name === "cabinet" && <WhatIfCalendar />}
+        {route.name === "cabinet" && <SummonsScan />}
 
         {route.name === "cabinet" && !snapshot && !error && (
           <div className="mx-auto min-h-screen max-w-3xl px-5 py-24">

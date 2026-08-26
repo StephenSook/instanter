@@ -85,6 +85,49 @@ class JudgeDoorStack(cdk.Stack):
             ],
         )
 
+        push = dynamodb.TableV2(
+            self,
+            "PushTable",
+            partition_key=dynamodb.Attribute(name="endpoint", type=dynamodb.AttributeType.STRING),
+            billing=dynamodb.Billing.on_demand(),
+            removal_policy=cdk.RemovalPolicy.DESTROY,
+        )
+
+        audit_lock = s3.Bucket(
+            self,
+            "AuditLock",
+            object_lock_enabled=True,
+            versioned=True,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            enforce_ssl=True,
+            removal_policy=cdk.RemovalPolicy.RETAIN,
+        )
+        cfn_lock = audit_lock.node.default_child
+        assert isinstance(cfn_lock, s3.CfnBucket)
+        cfn_lock.object_lock_configuration = s3.CfnBucket.ObjectLockConfigurationProperty(
+            object_lock_enabled="Enabled",
+            rule=s3.CfnBucket.ObjectLockRuleProperty(
+                default_retention=s3.CfnBucket.DefaultRetentionProperty(mode="COMPLIANCE", days=30)
+            ),
+        )
+
+        agent_role_arn = os.environ.get(
+            "AGENT_RUNTIME_ROLE_ARN",
+            "arn:aws:iam::741030561008:role/AgentCore-instanteragent--ApplicationAgentTriageRun-T1TMj581A16h",
+        )
+        if agent_role_arn:
+            # Imported roles are often immutable, so identity policies here
+            # can no-op. The bucket policy is the grant that actually lands.
+            audit_lock.add_to_resource_policy(
+                iam.PolicyStatement(
+                    sid="AgentRuntimePutLockedAudit",
+                    principals=[iam.ArnPrincipal(agent_role_arn)],
+                    actions=["s3:PutObject", "s3:PutObjectRetention"],
+                    resources=[audit_lock.arn_for_objects("*")],
+                )
+            )
+
         # ----------------------------------------------------------- door
         door = lambda_.Function(
             self,
@@ -93,7 +136,8 @@ class JudgeDoorStack(cdk.Stack):
             handler="handler.handler",
             code=lambda_.Code.from_asset("build/door"),
             timeout=cdk.Duration.seconds(120),
-            memory_size=512,
+            memory_size=1024,
+            architecture=lambda_.Architecture.X86_64,
             # NO reserved concurrency, and this is a constraint rather than a
             # preference. ADR-0006 chose reserved concurrency as the abuse
             # control over a $6/month WAF, but this account's TOTAL Lambda
@@ -112,9 +156,38 @@ class JudgeDoorStack(cdk.Stack):
                 "MAX_RUNS_PER_DAY": os.environ.get("MAX_RUNS_PER_DAY", "200"),
                 "MAX_SCHEDULED_RUNS_PER_DAY": os.environ.get("MAX_SCHEDULED_RUNS_PER_DAY", "2"),
                 "AWAITING_INDEX": "status-created_at-index",
+                "AUDIT_LOCK_BUCKET": audit_lock.bucket_name,
+                "PUSH_TABLE": push.table_name,
+                "VAPID_PUBLIC_KEY": os.environ.get("VAPID_PUBLIC_KEY", ""),
+                "VAPID_PRIVATE_KEY": os.environ.get("VAPID_PRIVATE_KEY", ""),
+                "VAPID_MAILTO": os.environ.get("VAPID_MAILTO", "mailto:stephensookra@gmail.com"),
             },
         )
         runs.grant_read_write_data(door)
+        push.grant_read_write_data(door)
+        audit_lock.grant_put(door)
+        door.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3:PutObject", "s3:PutObjectRetention"],
+                resources=[audit_lock.arn_for_objects("*")],
+            )
+        )
+        door.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "bedrock:InvokeModel",
+                    "bedrock:InvokeModelWithResponseStream",
+                    "bedrock:Converse",
+                    "bedrock:GetInferenceProfile",
+                ],
+                resources=[
+                    f"arn:aws:bedrock:us-east-1:{self.account}:inference-profile/us.amazon.nova-pro-v1:0",
+                    "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-pro-v1:0",
+                    "arn:aws:bedrock:us-east-2::foundation-model/amazon.nova-pro-v1:0",
+                    "arn:aws:bedrock:us-west-2::foundation-model/amazon.nova-pro-v1:0",
+                ],
+            )
+        )
         if agent_runtime_arn:
             door.add_to_role_policy(
                 iam.PolicyStatement(
@@ -258,3 +331,5 @@ class JudgeDoorStack(cdk.Stack):
         cdk.CfnOutput(self, "FunctionUrl", value=door_url.url)
         cdk.CfnOutput(self, "ConsoleBucketName", value=console.bucket_name)
         cdk.CfnOutput(self, "RunTableName", value=runs.table_name)
+        cdk.CfnOutput(self, "AuditLockBucket", value=audit_lock.bucket_name)
+        cdk.CfnOutput(self, "PushTableName", value=push.table_name)

@@ -1,0 +1,17 @@
+{
+  "name": "Instanter",
+  "short_name": "Instanter",
+  "description": "Georgia dispossessory answer-deadline triage. A sweep pings only when an attorney must decide.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#141414",
+  "theme_color": "#141414",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

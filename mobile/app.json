@@ -10,7 +10,11 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.stephensookra.instanter",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSSupportsLiveActivities": true
+      },
+      "entitlements": {
+        "com.apple.developer.usernotifications.live-activities": true
       },
       "appleTeamId": "Y8XVCMLQCZ"
     },
@@ -30,6 +34,18 @@
     "scheme": "instanter",
     "backgroundColor": "#141414",
     "primaryColor": "#c2352b",
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.2"
+          }
+        }
+      ],
+      "@bacons/apple-targets",
+      "./plugins/withInstanterLiveActivity.js"
+    ],
     "extra": {
       "doorUrl": "https://d2ew2t4uldglcr.cloudfront.net",
       "eas": {

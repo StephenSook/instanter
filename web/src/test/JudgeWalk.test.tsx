@@ -22,6 +22,10 @@ describe("JudgeWalk", () => {
       "href",
       "/api/stats",
     );
+    expect(screen.getByRole("link", { name: /photograph a summons/i })).toHaveAttribute(
+      "href",
+      "/#ocr",
+    );
     expect(screen.getByRole("link", { name: /the statute on paper/i })).toHaveAttribute(
       "href",
       "/evidence",

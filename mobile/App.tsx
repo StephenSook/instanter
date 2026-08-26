@@ -16,6 +16,7 @@ import {
 // This package is the one that reports them on both platforms.
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import Constants from "expo-constants";
+import { endWaitingActivity, startWaitingActivity } from "./liveActivity";
 
 /**
  * Instanter, for the attorney who is not at their desk.
@@ -92,8 +93,13 @@ export default function App() {
     try {
       const env = await post("/api/run", { capacity: 2 });
       const result: RunResult = env.result;
-      if (result?.interrupted) setScreen({ k: "awaiting", runId: env.run_id, result });
-      else setScreen({ k: "done", result });
+      if (result?.interrupted) {
+        startWaitingActivity(result.awaiting?.length ?? 0);
+        setScreen({ k: "awaiting", runId: env.run_id, result });
+      } else {
+        endWaitingActivity();
+        setScreen({ k: "done", result });
+      }
     } catch (e) {
       setScreen({ k: "failed", message: e instanceof Error ? e.message : String(e) });
     }
@@ -106,6 +112,7 @@ export default function App() {
       const env = await post(`/api/run/${encodeURIComponent(runId)}/decision`, {
         response: answer,
       });
+      endWaitingActivity();
       setScreen({ k: "done", result: env.result });
     } catch (e) {
       setScreen({ k: "failed", message: e instanceof Error ? e.message : String(e) });

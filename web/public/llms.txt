@@ -19,6 +19,8 @@ such; the statute, the court calendar, and every computation are real.
 - [Live cabinet](https://d2ew2t4uldglcr.cloudfront.net/api/queue): ranked queue recomputed on request
 - [Health](https://d2ew2t4uldglcr.cloudfront.net/api/health)
 - [TestFlight](https://testflight.apple.com/join/JqZ1wX25): Apple approved 2026-08-26
+- [Summons OCR](https://d2ew2t4uldglcr.cloudfront.net/#ocr): Nova transcribes the page; the engine computes the deadline
+- [Web Push](https://d2ew2t4uldglcr.cloudfront.net/api/push/vapid): ping only when a sweep stops for an attorney; no case data on the lock screen
 
 ## Source
 
