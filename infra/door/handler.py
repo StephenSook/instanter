@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 import boto3
+from boto3.dynamodb.conditions import Key
 
 from engine.deadline import CaseInput, compute_deadline
 from engine.rules import GEORGIA_RULE, ServiceMethod
@@ -42,6 +43,9 @@ TABLE_NAME = os.environ.get("RUN_TABLE", "")
 RUNTIME_ARN = os.environ.get("AGENT_RUNTIME_ARN", "")
 ORIGIN_SECRET = os.environ.get("ORIGIN_SECRET", "")
 GIT_SHA = os.environ.get("GIT_SHA", "unknown")
+# Sparse index over `status`. The daily counter rows carry no status attribute,
+# so they are absent from it by construction rather than filtered out.
+AWAITING_INDEX = os.environ.get("AWAITING_INDEX", "status-created_at-index")
 
 
 def _seed_path() -> Path:
@@ -81,6 +85,13 @@ def _seed_path() -> Path:
 # arithmetic and costs nothing however often it is called; /api/run invokes a
 # model. This counter bounds only the endpoint that can spend money.
 MAX_RUNS_PER_DAY = int(os.environ.get("MAX_RUNS_PER_DAY", "200"))
+# The scheduled morning sweep gets its own budget rather than sharing the
+# visitor cap. Those two caps defend against different things: the visitor cap
+# stops a stranger draining model spend, and this one stops a misconfigured or
+# retried schedule from firing the sweep in a loop. Sharing one counter would
+# mean a busy day of visitors silently cancels the clinic's morning sweep,
+# which is the one run that actually has to happen.
+MAX_SCHEDULED_RUNS_PER_DAY = int(os.environ.get("MAX_SCHEDULED_RUNS_PER_DAY", "2"))
 
 _ddb = None
 
@@ -92,23 +103,28 @@ def table() -> Any:
     return _ddb.Table(TABLE_NAME)
 
 
-def claim_daily_run_slot() -> tuple[bool, int]:
-    """Atomically count today's runs and say whether this one may proceed.
+def claim_daily_run_slot(origin: str = "visitor") -> tuple[bool, int]:
+    """Atomically count today's runs of one origin and say whether to proceed.
 
     ADD is an atomic counter in DynamoDB, so two simultaneous clicks cannot
     both read the same value and both decide they were under the cap. The
     counter row expires on its own, so nothing has to clean it up.
+
+    Each origin counts against its own row, so the scheduled sweep and the
+    visitor traffic cannot exhaust one another.
     """
+    cap = MAX_SCHEDULED_RUNS_PER_DAY if origin == "scheduled" else MAX_RUNS_PER_DAY
     today = time.strftime("%Y-%m-%d", time.gmtime())
+    key = f"__daily__{today}" if origin == "visitor" else f"__daily__{origin}__{today}"
     result = table().update_item(
-        Key={"run_id": f"__daily__{today}"},
+        Key={"run_id": key},
         UpdateExpression="ADD #n :one SET #e = :exp",
         ExpressionAttributeNames={"#n": "started", "#e": "expires_at"},
         ExpressionAttributeValues={":one": 1, ":exp": int(time.time()) + 3 * 24 * 3600},
         ReturnValues="UPDATED_NEW",
     )
     used = int(result["Attributes"]["started"])
-    return used <= MAX_RUNS_PER_DAY, used
+    return used <= cap, used
 
 
 def _json(status: int, body: dict[str, Any]) -> dict[str, Any]:
@@ -247,7 +263,7 @@ def _runtime_session_id() -> str:
     return f"door-{uuid.uuid4().hex}-{uuid.uuid4().hex[:8]}"
 
 
-def start_run(body: dict[str, Any]) -> dict[str, Any]:
+def start_run(body: dict[str, Any], origin: str = "visitor") -> dict[str, Any]:
     if not RUNTIME_ARN:
         # Loud, not silent. A door that pretends to start a run it cannot start
         # is the same defect as an interrupt with no persisted state.
@@ -262,7 +278,7 @@ def start_run(body: dict[str, Any]) -> dict[str, Any]:
             },
         )
 
-    allowed, used_today = claim_daily_run_slot()
+    allowed, used_today = claim_daily_run_slot(origin)
     if not allowed:
         # 429 with the numbers in it, so a judge who hits the cap knows this is
         # a deliberate spend bound rather than a broken endpoint, and knows the
@@ -271,8 +287,9 @@ def start_run(body: dict[str, Any]) -> dict[str, Any]:
             429,
             {
                 "error": "daily_run_cap_reached",
+                "origin": origin,
                 "runs_today": used_today,
-                "cap": MAX_RUNS_PER_DAY,
+                "cap": (MAX_SCHEDULED_RUNS_PER_DAY if origin == "scheduled" else MAX_RUNS_PER_DAY),
                 "detail": (
                     "This door invokes a paid model, so live runs are capped per "
                     "day. /api/stats is pure arithmetic and is never capped."
@@ -287,6 +304,7 @@ def start_run(body: dict[str, Any]) -> dict[str, Any]:
         Item={
             "run_id": run_id,
             "status": "starting",
+            "origin": origin,
             "runtime_session_id": session,
             "created_at": now,
             "expires_at": now + 7 * 24 * 3600,
@@ -294,9 +312,15 @@ def start_run(body: dict[str, Any]) -> dict[str, Any]:
         }
     )
 
-    client = boto3.client("bedrock-agentcore", region_name=REGION)
     payload = {"action": "start", "run_id": run_id, "capacity": int(body.get("capacity", 2))}
     try:
+        # Constructed INSIDE the try. It was outside, which meant a client that
+        # failed to build (bad region, missing credentials, a botocore data
+        # error) escaped as an unhandled exception: the run row stayed on
+        # "starting" forever and the caller got an opaque 500. The point of
+        # this block is that a failure is surfaced, and a crash is neither
+        # surfaced nor swallowed.
+        client = boto3.client("bedrock-agentcore", region_name=REGION)
         response = client.invoke_agent_runtime(
             agentRuntimeArn=RUNTIME_ARN,
             runtimeSessionId=session,
@@ -385,10 +409,80 @@ def decide(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
     return _json(200, {"run_id": run_id, "status": "resolved", "result": result})
 
 
+# ------------------------------------------------------- the morning sweep
+
+
+def list_awaiting() -> dict[str, Any]:
+    """Runs that stopped and are still waiting on a licensed attorney.
+
+    Queried through a sparse index on `status`, so the daily counter rows,
+    which carry no status, are absent by construction rather than by filter.
+    """
+    result = table().query(
+        IndexName=AWAITING_INDEX,
+        KeyConditionExpression=Key("status").eq("awaiting_attorney"),
+        ScanIndexForward=False,
+        Limit=25,
+    )
+    waiting = []
+    for item in result.get("Items", []):
+        raw = item.get("result")
+        parsed = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        waiting.append(
+            {
+                "run_id": item["run_id"],
+                "origin": item.get("origin", "visitor"),
+                "created_at": int(item.get("created_at", 0)),
+                "cases": len(parsed.get("awaiting") or []),
+            }
+        )
+    return {
+        "awaiting": waiting,
+        "count": len(waiting),
+        # Said plainly because it is the product's whole claim: the sweep runs
+        # whether or not anyone opened the page, and it stops rather than
+        # deciding.
+        "detail": (
+            "Runs that computed every deadline, ranked the queue, and then "
+            "stopped. Nothing in them is committed until an attorney answers."
+        ),
+    }
+
+
+def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
+    """The 7am sweep, fired by EventBridge Scheduler rather than by a click.
+
+    The README says a walk-in clinic cannot watch every clock. Until this
+    existed the agent only ran when a human pressed a button, which is the one
+    thing the pitch says nobody has time to do. It ends the same way a visitor
+    run does: at the attorney interrupt, with nothing committed.
+    """
+    body = {"capacity": int(event.get("capacity", 2))}
+    response = start_run(body, origin="scheduled")
+    payload = json.loads(response["body"])
+    # Returned rather than logged only, so a failed sweep shows up as a failed
+    # Scheduler invocation and can be alarmed on.
+    return {
+        "scheduled": True,
+        "statusCode": response["statusCode"],
+        "run_id": payload.get("run_id"),
+        "status": payload.get("status"),
+        "error": payload.get("error"),
+    }
+
+
 # ------------------------------------------------------------------ routing
 
 
 def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
+    # The scheduled sweep is checked FIRST and is unreachable over HTTP. A
+    # Function URL event always carries rawPath, and a POST body arrives as a
+    # STRING in event["body"] rather than merged into the event, so a caller
+    # cannot forge this marker by sending it as JSON. Both conditions are
+    # required rather than either, so the path cannot be reached by accident.
+    if event.get("instanter_scheduled_sweep") is True and "rawPath" not in event:
+        return scheduled_sweep(event)
+
     path = event.get("rawPath", "/")
     method = (event.get("requestContext", {}).get("http", {}) or {}).get("method", "GET")
     headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
@@ -418,6 +512,8 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
 
     if path == "/api/stats" and method == "GET":
         return _json(200, compute_stats())
+    if path == "/api/awaiting" and method == "GET":
+        return _json(200, list_awaiting())
     if path == "/api/run" and method == "POST":
         return start_run(body)
     if path.startswith("/api/run/"):

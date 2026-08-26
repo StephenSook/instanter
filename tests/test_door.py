@@ -280,3 +280,182 @@ def test_a_refused_case_still_counts_as_flagged() -> None:
     # Flags are counted across the whole corpus, so the count can exceed the
     # number of cases that produced a deadline.
     assert computation["cases_carrying_a_flag"] >= computation["refused_unverified"]
+
+
+# --------------------------------------------------- the scheduled sweep
+
+
+class _KeyedFakeTable:
+    """Counts per key, so two origins cannot exhaust one another's budget."""
+
+    def __init__(self, items: list[dict[str, Any]] | None = None) -> None:
+        self.counts: dict[str, int] = {}
+        self.items = items or []
+        self.puts: list[dict[str, Any]] = []
+
+    def update_item(self, **kwargs: Any) -> dict[str, Any]:
+        key = kwargs["Key"]["run_id"]
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return {"Attributes": {"started": self.counts[key]}}
+
+    def put_item(self, **kwargs: Any) -> dict[str, Any]:
+        self.puts.append(kwargs["Item"])
+        return {}
+
+    def query(self, **_kwargs: Any) -> dict[str, Any]:
+        return {"Items": self.items}
+
+
+def test_a_scheduled_event_routes_to_the_sweep_and_not_to_http(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole point: the sweep runs without anyone pressing a button."""
+    monkeypatch.setattr(door, "RUNTIME_ARN", "")
+    result = door.handler({"instanter_scheduled_sweep": True, "capacity": 2})
+    assert result["scheduled"] is True
+    # No runtime wired here, so it refuses loudly rather than reporting a run
+    # that never happened.
+    assert result["statusCode"] == 503
+    assert result["status"] is None
+
+
+def test_a_forged_http_request_cannot_reach_the_scheduled_path() -> None:
+    """The marker lives on the EVENT, and a POST body is a string beside it.
+
+    If this ever regressed, a stranger could fire the clinic's paid sweep by
+    POSTing a JSON body, bypassing the visitor cap entirely, because the
+    scheduled origin counts against a different budget.
+    """
+    status, body = call(
+        "/api/run",
+        method="POST",
+        body=json.dumps({"instanter_scheduled_sweep": True}),
+    )
+    # It is routed as ordinary HTTP. Whatever it does next, it is NOT the sweep.
+    assert "scheduled" not in body
+    assert status in (400, 429, 503, 502, 202)
+
+
+def test_the_marker_alone_is_not_enough_when_rawpath_is_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both conditions are required, so neither alone opens the path."""
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+    forged = event("/api/stats")
+    forged["instanter_scheduled_sweep"] = True
+    result = door.handler(forged)
+    assert "scheduled" not in result
+    assert result["statusCode"] == 200
+
+
+def test_the_scheduled_budget_is_separate_from_the_visitor_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A busy day of visitors must not cancel the clinic's morning sweep."""
+    fake = _KeyedFakeTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "MAX_RUNS_PER_DAY", 1)
+    monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 1)
+
+    assert door.claim_daily_run_slot("visitor") == (True, 1)
+    # The visitor budget is now spent, and the sweep is untouched by that.
+    assert door.claim_daily_run_slot("visitor")[0] is False
+    assert door.claim_daily_run_slot("scheduled") == (True, 1)
+    assert door.claim_daily_run_slot("scheduled")[0] is False
+
+
+def test_the_scheduled_cap_refusal_reports_its_own_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _KeyedFakeTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 0)
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+
+    result = door.handler({"instanter_scheduled_sweep": True})
+    assert result["statusCode"] == 429
+    assert result["error"] == "daily_run_cap_reached"
+
+
+def test_a_run_records_which_origin_started_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without this the awaiting list cannot say the sweep ran on its own."""
+    fake = _KeyedFakeTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 5)
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+
+    def explode(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("no network in tests")
+
+    monkeypatch.setattr(boto3, "client", explode)
+    door.handler({"instanter_scheduled_sweep": True})
+    assert fake.puts, "the run row was never written"
+    assert fake.puts[0]["origin"] == "scheduled"
+
+
+def test_awaiting_lists_runs_that_stopped_for_an_attorney(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _KeyedFakeTable(
+        items=[
+            {
+                "run_id": "abc123",
+                "origin": "scheduled",
+                "created_at": 1_700_000_000,
+                "result": json.dumps({"awaiting": [{"case_id": "26ED1"}, {"case_id": "26ED2"}]}),
+            }
+        ]
+    )
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+
+    status, body = call("/api/awaiting")
+    assert status == 200
+    assert body["count"] == 1
+    assert body["awaiting"][0]["origin"] == "scheduled"
+    assert body["awaiting"][0]["cases"] == 2
+    assert "committed" in body["detail"], "the endpoint should state what it does NOT do"
+
+
+def test_awaiting_is_empty_rather_than_absent_when_nothing_is_waiting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty list and a missing key read very differently to a client."""
+    monkeypatch.setattr(door, "table", lambda: _KeyedFakeTable(items=[]))
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+    status, body = call("/api/awaiting")
+    assert status == 200
+    assert body["awaiting"] == []
+    assert body["count"] == 0
+
+
+def test_awaiting_is_behind_the_origin_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "a-secret")
+    status, body = call("/api/awaiting")
+    assert status == 403
+    assert body["error"] == "direct_origin_access_refused"
+
+
+def test_a_client_that_cannot_be_built_is_a_502_and_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The client construction belongs inside the error handling, not beside it.
+
+    It used to sit outside, so a bad region or missing credentials escaped as
+    an unhandled exception: the caller got an opaque 500 and the run row stayed
+    on "starting" forever, which is the silent-failure shape this door exists
+    to avoid.
+    """
+    fake = _KeyedFakeTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "MAX_RUNS_PER_DAY", 5)
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+
+    def unbuildable(*_a: Any, **_k: Any) -> None:
+        raise ValueError("Invalid endpoint")
+
+    monkeypatch.setattr(boto3, "client", unbuildable)
+    status, body = call("/api/run", method="POST", body="{}")
+    assert status == 502
+    assert body["status"] == "failed"
+    assert "Invalid endpoint" in body["error"]

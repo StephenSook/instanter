@@ -20,6 +20,7 @@ be a mistake, not a tradeoff.
 
 from __future__ import annotations
 
+import json
 import os
 
 import aws_cdk as cdk
@@ -30,6 +31,7 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_s3_deployment as s3deploy
+from aws_cdk import aws_scheduler as scheduler
 from constructs import Construct
 
 
@@ -59,6 +61,22 @@ class JudgeDoorStack(cdk.Stack):
             billing=dynamodb.Billing.on_demand(),
             time_to_live_attribute="expires_at",
             removal_policy=cdk.RemovalPolicy.DESTROY,
+            global_secondary_indexes=[
+                dynamodb.GlobalSecondaryIndexPropsV2(
+                    index_name="status-created_at-index",
+                    partition_key=dynamodb.Attribute(
+                        name="status", type=dynamodb.AttributeType.STRING
+                    ),
+                    sort_key=dynamodb.Attribute(
+                        name="created_at", type=dynamodb.AttributeType.NUMBER
+                    ),
+                    # A sparse index: the daily counter rows carry no status, so
+                    # they never enter it, and "which runs are waiting on an
+                    # attorney" is a query rather than a scan with a filter.
+                    projection_type=dynamodb.ProjectionType.INCLUDE,
+                    non_key_attributes=["origin", "result"],
+                )
+            ],
         )
 
         # ----------------------------------------------------------- door
@@ -86,6 +104,8 @@ class JudgeDoorStack(cdk.Stack):
                 "AGENT_RUNTIME_ARN": agent_runtime_arn,
                 "GIT_SHA": git_sha,
                 "MAX_RUNS_PER_DAY": os.environ.get("MAX_RUNS_PER_DAY", "200"),
+                "MAX_SCHEDULED_RUNS_PER_DAY": os.environ.get("MAX_SCHEDULED_RUNS_PER_DAY", "2"),
+                "AWAITING_INDEX": "status-created_at-index",
             },
         )
         runs.grant_read_write_data(door)
@@ -100,6 +120,54 @@ class JudgeDoorStack(cdk.Stack):
             )
 
         door_url = door.add_function_url(auth_type=lambda_.FunctionUrlAuthType.NONE)
+
+        # ------------------------------------------------- the morning sweep
+        # The product's claim is that a walk-in clinic cannot watch every
+        # clock. Until this existed the agent only ran when somebody pressed a
+        # button, which is precisely the thing the pitch says nobody has time
+        # to do. EventBridge Scheduler fires the sweep at 7am in the court's
+        # own timezone; it ends where a visitor run ends, at the attorney
+        # interrupt, with nothing committed.
+        sweep_role = iam.Role(
+            self,
+            "SweepSchedulerRole",
+            assumed_by=iam.ServicePrincipal("scheduler.amazonaws.com"),
+        )
+        door.grant_invoke(sweep_role)
+        scheduler.CfnSchedule(
+            self,
+            "MorningSweep",
+            flexible_time_window=scheduler.CfnSchedule.FlexibleTimeWindowProperty(
+                # A quarter hour of slack: nothing here is time-critical to the
+                # minute, and a window lets AWS spread scheduled load.
+                mode="FLEXIBLE",
+                maximum_window_in_minutes=15,
+            ),
+            schedule_expression="cron(0 7 ? * MON-FRI *)",
+            # Deadlines are counted in the court's calendar, so the sweep runs
+            # on the court's clock rather than UTC. Fulton County State Court
+            # sits in America/New_York, and this also means the schedule
+            # follows daylight saving without a code change.
+            schedule_expression_timezone="America/New_York",
+            state="ENABLED",
+            description="Instanter: the 7am triage sweep, weekdays, court time.",
+            target=scheduler.CfnSchedule.TargetProperty(
+                arn=door.function_arn,
+                role_arn=sweep_role.role_arn,
+                # This marker is what the handler routes on. It cannot arrive
+                # over HTTP: a Function URL event always carries rawPath, and a
+                # POST body is a string rather than merged into the event.
+                input=json.dumps({"instanter_scheduled_sweep": True, "capacity": 2}),
+                retry_policy=scheduler.CfnSchedule.RetryPolicyProperty(
+                    # One retry, not the default 185. A sweep that failed twice
+                    # should page a human, not spend the day retrying a paid
+                    # model call, and the handler's own scheduled cap of 2 is
+                    # the backstop if this is ever raised.
+                    maximum_retry_attempts=1,
+                    maximum_event_age_in_seconds=3600,
+                ),
+            ),
+        )
 
         # -------------------------------------------------------- console
         console = s3.Bucket(
