@@ -26,6 +26,8 @@ BUILD = ROOT / "infra" / "build" / "door"
 SOURCES = [
     (ROOT / "infra" / "door" / "handler.py", BUILD / "handler.py"),
     (ROOT / "engine", BUILD / "engine"),
+    (ROOT / "agent" / "__init__.py", BUILD / "agent" / "__init__.py"),
+    (ROOT / "agent" / "triage.py", BUILD / "agent" / "triage.py"),
     (ROOT / "seed" / "synthetic_intake.json", BUILD / "seed" / "synthetic_intake.json"),
 ]
 
@@ -53,6 +55,7 @@ def main() -> int:
         BUILD / "engine" / "deadline.py",
         BUILD / "engine" / "rules.py",
         BUILD / "engine" / "holidays.py",
+        BUILD / "agent" / "triage.py",
         BUILD / "seed" / "synthetic_intake.json",
     ]
     missing = [p for p in required if not p.exists()]

@@ -14,7 +14,11 @@ such; the statute, the court calendar, and every computation are real.
 - [Live recomputation](https://d2ew2t4uldglcr.cloudfront.net/api/stats): recomputes
   every answer deadline in the corpus on each request and reports how many of them
   counting seven days by hand gets wrong. Nothing is cached.
+- [Judge walk](https://d2ew2t4uldglcr.cloudfront.net/judge): numbered three-minute itinerary
+- [Evidence](https://d2ew2t4uldglcr.cloudfront.net/evidence): the 4 of 46 as lists
+- [Live cabinet](https://d2ew2t4uldglcr.cloudfront.net/api/queue): ranked queue recomputed on request
 - [Health](https://d2ew2t4uldglcr.cloudfront.net/api/health)
+- [TestFlight](https://testflight.apple.com/join/JqZ1wX25): Apple approved 2026-08-26
 
 ## Source
 

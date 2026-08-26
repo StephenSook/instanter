@@ -72,7 +72,7 @@ export function Packet({
         <div className="mx-auto flex max-w-[1400px] gap-0 px-5 py-8 sm:px-10 sm:py-12">
           <article
             data-sheet
-            className="paper-grain relative w-full rounded-[2px] bg-[var(--color-paper)] px-5 py-8 text-[var(--color-ink)] shadow-[0_10px_40px_rgba(0,0,0,0.35)] sm:px-10 sm:py-12"
+            className="torn-edge paper-grain relative w-full rounded-[2px] bg-[var(--color-paper)] px-5 py-8 text-[var(--color-ink)] shadow-[0_10px_40px_rgba(0,0,0,0.35)] sm:px-10 sm:py-12"
           >
             {/* Punch holes, coloured to the folder. */}
             <span aria-hidden="true" className="absolute top-0 bottom-0 left-3 hidden w-3 sm:block">

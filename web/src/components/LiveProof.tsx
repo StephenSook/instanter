@@ -20,7 +20,7 @@ import { loadStats, type Stats } from "../data";
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <section className="border-b border-white/10 bg-black/30">
+    <section id="live-proof" className="border-b border-white/10 bg-black/30">
       <div className="mx-auto max-w-[1400px] px-5 py-6 sm:px-10">
         {children}
       </div>

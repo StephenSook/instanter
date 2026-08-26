@@ -14,6 +14,9 @@ Four endpoints, and only one of them is the point:
 * ``GET  /api/what-if``         one statutory computation on a date the visitor
                                 chose. Same ``compute_deadline`` the tests cover.
                                 Pure arithmetic, never capped.
+* ``GET  /api/queue``           the filing cabinet, recomputed on this request
+                                from the engine plus the triage ladder. Not a
+                                stored snapshot. Never capped.
 * ``POST /api/run``             start a triage sweep on the deployed agent.
 * ``GET  /api/run/{id}``        poll it. The door polls because a managed Python
                                 Lambda cannot stream (ADR-0006).
@@ -39,6 +42,7 @@ from zoneinfo import ZoneInfo
 import boto3
 from boto3.dynamodb.conditions import Key
 
+from agent.triage import TriageCase, triage_queue
 from engine.deadline import CaseInput, compute_deadline
 from engine.rules import GEORGIA_RULE, ServiceMethod
 
@@ -352,6 +356,116 @@ def what_if_from_event(event: dict[str, Any], body: dict[str, Any]) -> dict[str,
             },
         )
     return _json(200, compute_what_if(service_date, method))
+
+
+def compute_queue() -> dict[str, Any]:
+    """Rank the corpus with the same engine and ladder the snapshot uses.
+
+    This is the live cabinet. It does not invoke a model, so it is never
+    capped. Writer rationales are omitted: they appear when someone Sweeps.
+    The UI may display this payload. It may not invent a date or a rank.
+    """
+    seed = json.loads(_seed_path().read_text())
+    records = seed["records"]
+    run_date = date.fromisoformat(str(seed["demo_run_date"]))
+    capacity = 2
+
+    started = time.perf_counter()
+    triage_cases: list[TriageCase] = []
+    by_id: dict[str, tuple[dict[str, Any], Any]] = {}
+    for record in records:
+        result = compute_deadline(_case_input(record), GEORGIA_RULE)
+        by_id[record["case_id"]] = (record, result)
+        triage_cases.append(
+            TriageCase(
+                case_id=record["case_id"],
+                deadline=result,
+                answer_filed=bool(record.get("answer_filed")),
+                notes_present=bool(str(record.get("notes") or "").strip()),
+            )
+        )
+    decisions = triage_queue(triage_cases, run_date, capacity)
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+
+    cases: list[dict[str, Any]] = []
+    for decision in decisions:
+        record, result = by_id[decision.case_id]
+        cases.append(
+            {
+                "case_id": decision.case_id,
+                "level": decision.level.value,
+                "floor_level": decision.floor_level.value,
+                "rank": decision.rank,
+                "days_remaining": decision.days_remaining,
+                "interrupt_now": decision.interrupt_now,
+                "held_reason": decision.held_reason,
+                "raised_by": list(decision.raised_by),
+                "factors": list(decision.factors),
+                "flags": [
+                    {
+                        "code": flag.code.value,
+                        "reason": flag.reason,
+                        "day": flag.day.isoformat() if flag.day else None,
+                    }
+                    for flag in result.flags
+                ],
+                "effective_deadline": (
+                    result.effective_deadline.isoformat() if result.effective_deadline else None
+                ),
+                "computed_deadline": (
+                    result.computed_deadline.isoformat() if result.computed_deadline else None
+                ),
+                "deadline_basis": result.deadline_basis.value,
+                "citation": result.citation,
+                "court_reopens_on": (
+                    result.court_reopens_on.isoformat() if result.court_reopens_on else None
+                ),
+                "trace": [
+                    {"day": step.day.isoformat(), "label": step.label} for step in result.trace
+                ],
+                "service_date": record.get("service_date"),
+                "service_method": record.get("service_method"),
+                "answer_filed": bool(record.get("answer_filed")),
+                "tenant_display_name": record.get("tenant_display_name") or "",
+                "property_address": record.get("property_address") or "",
+                "notes": record.get("notes") or "",
+                "label": record.get("label") or "EXAMPLE DATA",
+                "rationale": None,
+                "packet_memo": None,
+            }
+        )
+
+    interrupts = [c["case_id"] for c in cases if c["interrupt_now"]]
+    return {
+        "generated_by": "door /api/queue (engine + triage ladder, recomputed on this request)",
+        "source": "live",
+        "mode": "live-ladder",
+        "run_date": run_date.isoformat(),
+        "attorney_capacity": capacity,
+        "elapsed_ms": elapsed_ms,
+        "label": seed.get("label", "EXAMPLE DATA"),
+        "succeeded": True,
+        "report": {
+            "run_id": "queue-live",
+            "committed": [],
+            "interrupts": interrupts,
+            "refused": [],
+            "failures": [],
+            "attorney_action": "none",
+            "backstop_used": False,
+        },
+        "cases": cases,
+        "audit": [],
+        "counts": {
+            "total": len(cases),
+            "interrupt": sum(1 for c in cases if c["level"] == "interrupt"),
+            "surface_today": sum(1 for c in cases if c["level"] == "surface_today"),
+            "monitor": sum(1 for c in cases if c["level"] == "monitor"),
+            "hold": sum(1 for c in cases if c["level"] == "hold"),
+            "flagged": sum(1 for c in cases if c["flags"]),
+            "audit_events": 0,
+        },
+    }
 
 
 def attach_steps(result: dict[str, Any]) -> dict[str, Any]:
@@ -768,6 +882,8 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
         return _json(200, compute_stats())
     if path == "/api/what-if" and method == "GET":
         return what_if_from_event(event, body)
+    if path == "/api/queue" and method == "GET":
+        return _json(200, compute_queue())
     if path == "/api/awaiting" and method == "GET":
         return _json(200, list_awaiting())
     if path == "/api/run" and method == "POST":

@@ -39,7 +39,7 @@ const UNCLEAR = "aprove";
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <section className="border-b border-white/10 bg-[var(--color-ground-soft)]">
+    <section id="sweep" className="border-b border-white/10 bg-[var(--color-ground-soft)]">
       <div className="mx-auto max-w-[1400px] px-5 py-10 sm:px-10">{children}</div>
     </section>
   );
@@ -66,7 +66,7 @@ function Stamp({ label, tone }: { label: string; tone: string }) {
   return (
     <div
       ref={ref}
-      className="inline-block -rotate-6 rounded-[3px] border-[3px] px-4 py-1.5 font-mono text-[1.05rem] font-bold tracking-[0.2em] uppercase"
+      className="stamp-ink inline-block -rotate-6 rounded-[3px] border-[3px] px-4 py-1.5 font-mono text-[1.05rem] font-bold tracking-[0.2em] uppercase"
       style={{ color: tone, borderColor: tone }}
     >
       {label}
@@ -79,7 +79,7 @@ function CaseRow({ c }: { c: AwaitingCase }) {
   return (
     <li
       data-desk-card
-      className="paper-grain rounded-[3px] bg-[var(--color-paper)] p-4 text-[var(--color-ink)]"
+      className="torn-edge paper-grain rounded-[3px] bg-[var(--color-paper)] p-4 text-[var(--color-ink)]"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="font-mono text-[0.95rem] font-semibold">{c.case_id}</span>
@@ -223,6 +223,7 @@ export function RunPanel() {
               type="button"
               disabled={busy}
               onClick={() => answer(UNCLEAR)}
+              id="unclear"
               className="font-mono text-[0.66rem] tracking-[0.12em] text-white/55 uppercase underline decoration-white/40 underline-offset-4 disabled:opacity-50 hover:text-white/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-flag)]"
             >
               Or send an unclear answer, and watch it refuse

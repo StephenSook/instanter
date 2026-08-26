@@ -8,6 +8,10 @@ A background triage agent for eviction-defense clinics. It watches a clinic's in
 
 **<https://d2ew2t4uldglcr.cloudfront.net>**. No account, no key, no login.
 
+A three-minute walk for a judge: **<https://d2ew2t4uldglcr.cloudfront.net/judge>**.
+The 4 of 46 as lists you can count: **<https://d2ew2t4uldglcr.cloudfront.net/evidence>**.
+The filing cabinet, recomputed on this request: **<https://d2ew2t4uldglcr.cloudfront.net/api/queue>**.
+
 **<https://d2ew2t4uldglcr.cloudfront.net/api/stats>** recomputes every answer deadline in the corpus on each request and reports what it found. Nothing there is cached or stored, so the numbers below are measured while you read them:
 
 > **4 of 46 answer deadlines in the corpus are ones counting seven days by hand gets wrong.**
@@ -44,7 +48,7 @@ The mobile app is the **attorney's decision surface**, not a second console. It 
 | | |
 |---|---|
 | **Android** | [`instanter.apk`](https://github.com/StephenSook/instanter/releases/latest) on the latest release. Signed with our own release key, so Android will ask you to allow the install |
-| **iOS** | <https://testflight.apple.com/join/JqZ1wX25> (public TestFlight link) |
+| **iOS** | <https://testflight.apple.com/join/JqZ1wX25>. Apple approved Beta App Review on 2026-08-26; the public TestFlight is live. |
 
 The APK is a release asset rather than a build-service URL on purpose: build-service links expire in days while the repo, CI and deployment all stay green, so the download rots while every check still reports success.
 

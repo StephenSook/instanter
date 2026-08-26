@@ -49,7 +49,7 @@ export function Cabinet({ snapshot, onOpen }: { snapshot: QueueSnapshot; onOpen:
   })).filter((g) => g.cases.length > 0);
 
   return (
-    <div className="pb-28">
+    <div id="cabinet" className="pb-28">
       <div ref={heroRef} className="mx-auto max-w-[1400px] px-5 pt-14 pb-10 sm:px-10 sm:pt-24">
         <div className="overflow-hidden">
           <h1 data-hero-line className="display text-[clamp(2.9rem,9.5vw,8.5rem)]">
@@ -61,6 +61,11 @@ export function Cabinet({ snapshot, onOpen }: { snapshot: QueueSnapshot; onOpen:
             Fulton County dispossessory intake for {snapshot.run_date}. Every answer deadline below was
             computed from the statute, never estimated by a model. The ladder ranks, attorney capacity
             rations, and a licensed human decides.
+          </p>
+          <p className="mt-3 font-mono text-[0.62rem] tracking-[0.12em] text-white/45 uppercase">
+            {snapshot.source === "snapshot"
+              ? "Door unreachable: this cabinet is the last exported snapshot, not a live recompute."
+              : "Recomputed on this request from the engine and the triage ladder."}
           </p>
         </div>
         <dl className="mt-10 grid max-w-3xl grid-cols-2 gap-x-10 gap-y-6 sm:grid-cols-4">

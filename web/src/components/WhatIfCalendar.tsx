@@ -41,7 +41,7 @@ export function WhatIfCalendar() {
     state.result.flags.some((f) => f.code === "court_closed_not_legal_holiday");
 
   return (
-    <section className="border-b border-white/10 bg-[var(--color-ground-soft)]">
+    <section id="what-if" className="border-b border-white/10 bg-[var(--color-ground-soft)]">
       <div className="mx-auto max-w-[1400px] px-5 py-10 sm:px-10">
         <p className="font-mono text-[0.66rem] tracking-[0.2em] text-white/55 uppercase">
           Paper calendar
@@ -93,7 +93,7 @@ export function WhatIfCalendar() {
         )}
 
         {state.k === "ready" && (
-          <div className="paper-grain mt-8 max-w-3xl rounded-[3px] bg-[var(--color-paper)] p-6 text-[var(--color-ink)] shadow-[0_8px_0_rgba(0,0,0,0.25)]">
+          <div className="torn-edge paper-grain mt-8 max-w-3xl rounded-[3px] bg-[var(--color-paper)] p-6 text-[var(--color-ink)] shadow-[0_8px_0_rgba(0,0,0,0.25)]">
             <p className="font-mono text-[0.62rem] tracking-[0.18em] text-[var(--color-ink-soft)] uppercase">
               {state.result.label}
             </p>

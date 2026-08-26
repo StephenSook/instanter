@@ -791,3 +791,54 @@ def test_attach_steps_does_not_invent_kinds_when_the_payload_already_has_them() 
     original = [{"seq": 1, "kind": "extract"}]
     out = door.attach_steps({"total_cases": 48, "interrupted": True, "steps": original})
     assert out["steps"] == original
+
+
+# ----------------------------------------------------------------- live queue
+
+
+def test_queue_is_the_engine_and_the_ladder_on_this_request() -> None:
+    """The cabinet must not invent a date or a rank.
+
+    Deadlines match compute_deadline on the same records. Interrupt rationing
+    respects capacity 2. 26ED00101 is overdue on the corpus run date, so it
+    is an interrupt.
+    """
+    from datetime import date
+
+    from engine.deadline import CaseInput, compute_deadline
+    from engine.rules import GEORGIA_RULE, ServiceMethod
+
+    status, body = call("/api/queue")
+    assert status == 200
+    assert body["source"] == "live"
+    assert "recomputed on this request" in body["generated_by"]
+    assert body["attorney_capacity"] == 2
+    assert len(body["cases"]) == 48
+
+    by_id = {c["case_id"]: c for c in body["cases"]}
+    assert by_id["26ED00101"]["interrupt_now"] is True
+    assert by_id["26ED00101"]["computed_deadline"] == "2026-09-08"
+    interrupts = [c for c in body["cases"] if c["interrupt_now"]]
+    assert len(interrupts) <= 2
+
+    sample = by_id["26ED00101"]
+    engine = compute_deadline(
+        CaseInput(
+            case_id="26ED00101",
+            jurisdiction_id="GA-FULTON",
+            service_date=date(2026, 9, 1),
+            service_method=ServiceMethod.PERSONAL,
+        ),
+        GEORGIA_RULE,
+    )
+    assert engine.computed_deadline is not None
+    assert sample["computed_deadline"] == engine.computed_deadline.isoformat()
+    assert sample["rationale"] is None
+
+
+def test_queue_flag_count_matches_stats() -> None:
+    _, queue = call("/api/queue")
+    _, stats = call("/api/stats")
+    flagged = sum(1 for c in queue["cases"] if c.get("flags"))
+    assert flagged == stats["computation"]["cases_carrying_a_flag"]
+    assert flagged == queue["counts"]["flagged"]

@@ -45,6 +45,7 @@ export interface Case {
 
 export interface QueueSnapshot {
   generated_by: string;
+  source?: "live" | "snapshot";
   run_date: string;
   attorney_capacity: number;
   label: string;
@@ -81,12 +82,31 @@ export const BANDS: Record<Level, { label: string; short: string; color: string 
 export const BAND_ORDER: Level[] = ["interrupt", "surface_today", "monitor", "hold"];
 
 export async function loadQueue(): Promise<QueueSnapshot> {
+  try {
+    const live = await fetch("/api/queue", {
+      cache: "no-store",
+      headers: { accept: "application/json" },
+    });
+    if (live.ok) {
+      const data = (await live.json()) as QueueSnapshot;
+      if (Array.isArray(data.cases) && data.cases.length > 0) {
+        return { ...data, source: data.source ?? "live" };
+      }
+    }
+  } catch {
+    // Door down: the exported snapshot is the honest fallback, same as LiveProof
+    // showing no number rather than a stored one.
+  }
   const response = await fetch(`${import.meta.env.BASE_URL}queue.json`);
   if (!response.ok) {
     throw new Error(`queue snapshot unavailable (HTTP ${response.status})`);
   }
-  return (await response.json()) as QueueSnapshot;
+  const snapshot = (await response.json()) as QueueSnapshot;
+  return { ...snapshot, source: "snapshot" };
 }
+
+export const TESTFLIGHT_URL = "https://testflight.apple.com/join/JqZ1wX25";
+export const APK_URL = "https://github.com/StephenSook/instanter/releases/latest";
 
 /** Human-readable countdown. Overdue is stated as overdue, never as a
  *  negative number: an attorney reads "1 day overdue", not "-1 days". */
