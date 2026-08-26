@@ -60,7 +60,15 @@ The seven-day answer window in a Georgia dispossessory case is unforgiving: if t
 
 ## Architecture
 
-Coming with the build: architecture diagram, deployment guide, and a full statutory citation chain. The design principle, from AWS Prescriptive Guidance: "Use deterministic execution logic unless AI is needed." The deadline math is plain, tested Python. The model perceives (reads intake notes) and communicates (explains an escalation). A human decides.
+![Instanter architecture](docs/architecture.svg)
+
+The design principle, from AWS Prescriptive Guidance: "Use deterministic execution logic unless AI is needed." The deadline math is plain, tested Python. The model perceives (reads intake notes) and communicates (explains an escalation). A human decides.
+
+Two things start a run: **Amazon EventBridge Scheduler** at 7am on weekdays in `America/New_York`, because deadlines are counted in the court's calendar, and a browser with no credentials. Both end in the same place, at the attorney interrupt, with nothing committed.
+
+The agent is a **Strands Agents** `GraphBuilder` graph of three nodes, `analyst → writer → drafter`, where the edge into `drafter` is a real conditional: its predicate is `attorney_action == "approved" and committed_case_ids is not empty`, so a deferred run never reaches it. The interrupt is a `BeforeToolCallEvent` hook calling `event.interrupt()`, and the run's state persists to Amazon S3 so the answer can arrive from a different process.
+
+`InvokeAgentRuntime` accepts only IAM SigV4 or an OAuth bearer token, so a browser cannot reach the agent directly. A Lambda holds the credential and invokes it server-side, behind one CloudFront distribution with two origins. The Function URL stays public and CloudFront injects a shared secret, because Origin Access Control on a Function URL forces `AWS_IAM`, after which a browser POST needs `x-amz-content-sha256` that a plain `fetch` will not send.
 
 ## Repository layout
 
