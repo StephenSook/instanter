@@ -60,12 +60,18 @@ export function SummonsScan() {
   }
 
   async function sample() {
-    const res = await fetch("/sample-summons.jpg");
-    if (!res.ok) {
-      setState({ k: "failed", message: "The sample summons is not on this door." });
-      return;
+    try {
+      const res = await fetch("/sample-summons.jpg");
+      if (!res.ok) {
+        setState({ k: "failed", message: "The sample summons is not on this door." });
+        return;
+      }
+      await send(await res.blob(), "image/jpeg");
+    } catch (e) {
+      // A network-level throw (offline, blocked) must not strand the UI at
+      // idle with no message.
+      setState({ k: "failed", message: e instanceof Error ? e.message : String(e) });
     }
-    await send(await res.blob(), "image/jpeg");
   }
 
   return (

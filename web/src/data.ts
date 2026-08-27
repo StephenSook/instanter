@@ -1,6 +1,8 @@
-/** The console renders engine output. Every field here is produced by
- *  `scripts/export_queue.py` from a real deterministic sweep; nothing in
- *  the UI invents a date, a day count, or a rank. */
+/** The console renders engine output; nothing in the UI invents a date, a
+ *  day count, or a rank. The cabinet's primary source is the live door
+ *  (`GET /api/queue`, recomputed per request); `queue.json`, produced by
+ *  `scripts/export_queue.py` from a real sweep, is only the labelled
+ *  fallback shown when the door is unreachable. */
 
 export type Level = "interrupt" | "surface_today" | "monitor" | "hold";
 
@@ -248,9 +250,24 @@ async function send(path: string, body?: unknown): Promise<RunEnvelope> {
   if (!response.ok) {
     // The door explains itself (a spend cap, an unconfigured runtime). Carry
     // its words up rather than replacing them with a generic failure.
-    const detail =
+    let detail =
       (parsed?.detail as string) || (parsed?.error as string) || `HTTP ${response.status}`;
+    if (response.status === 504) {
+      // CloudFront gave up waiting, but the Lambda behind it keeps going: the
+      // sweep usually still stops for an attorney and then shows in the
+      // awaiting banner. Say that instead of a bare status code.
+      detail =
+        "The door timed out waiting for the run, but the sweep itself may still " +
+        "finish behind it. If it stops for an attorney it will appear in the " +
+        "waiting banner above.";
+    }
     throw new DoorError(detail, response.status, parsed);
+  }
+  if (parsed === null) {
+    // CloudFront rewrites origin 404s to the console's own HTML with a 200,
+    // so a vanished run record would land here as ok-but-not-JSON. Refuse it
+    // rather than letting a null shape crash the panel.
+    throw new DoorError("The door did not answer this route with JSON.", response.status, null);
   }
   return parsed as unknown as RunEnvelope;
 }

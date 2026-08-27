@@ -44,7 +44,19 @@ export function PushToggle() {
         });
         return;
       }
-      const reg = await navigator.serviceWorker.ready;
+      // serviceWorker.ready never settles if registration failed, so a bare
+      // await here would hang the button forever with no message. Bound it.
+      const reg = (await Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+      ])) as ServiceWorkerRegistration | null;
+      if (!reg) {
+        setState({
+          k: "blocked",
+          detail: "The service worker did not register, so this browser cannot receive pings.",
+        });
+        return;
+      }
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(keyBody.publicKey) as BufferSource,
@@ -55,7 +67,19 @@ export function PushToggle() {
         body: JSON.stringify(sub.toJSON()),
       });
       if (!saved.ok) {
-        setState({ k: "blocked", detail: "The door refused the subscription." });
+        // The door explains its refusals; carry its words up.
+        let detail = "The door refused the subscription.";
+        try {
+          const b = (await saved.json()) as { error?: string; cap?: number };
+          if (b.error === "subscription_cap_reached") {
+            detail = `The door is at its subscription cap (${b.cap ?? "full"}).`;
+          } else if (b.error) {
+            detail = `The door refused the subscription: ${b.error}.`;
+          }
+        } catch {
+          // keep the generic line
+        }
+        setState({ k: "blocked", detail });
         return;
       }
       setState({ k: "on" });
