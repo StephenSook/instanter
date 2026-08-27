@@ -49,7 +49,7 @@ The mobile app is the **attorney's decision surface**, not a second console. It 
 | | |
 |---|---|
 | **Android** | [`instanter.apk`](https://github.com/StephenSook/instanter/releases/latest) on the latest release. Signed with our own release key, so Android will ask you to allow the install |
-| **iOS** | <https://testflight.apple.com/join/JqZ1wX25>. Apple approved Beta App Review on 2026-08-26; the public TestFlight is live. |
+| **iOS** | <https://testflight.apple.com/join/JqZ1wX25>. Build 14 is Beta App Review approved and includes the count-only Live Activity. |
 
 The APK is a release asset rather than a build-service URL on purpose: build-service links expire in days while the repo, CI and deployment all stay green, so the download rots while every check still reports success.
 
@@ -57,7 +57,7 @@ The APK is a release asset rather than a build-service URL on purpose: build-ser
 
 Under active build for the Agents for Humans Hackathon (submission window Aug 10 to Sep 14, 2026). This README grows with the code; nothing is claimed here before it ships.
 
-Shipped and reachable today: the deterministic deadline engine, the triage agent with its attorney-approval interrupt on AgentCore Runtime, the operator console, the public door above, summons OCR (`POST /api/ocr`), Web Push on a real attorney interrupt (`GET /api/push/vapid`), custom `instanter.*` spans on the run receipt, and S3 Object Lock (Compliance, 30 days) on the audit trail. The iOS app starts a count-only Live Activity at the interrupt; the widget target ships in this repo. A TestFlight binary that includes the widget follows the next EAS iOS submit.
+Shipped and reachable today: the deterministic deadline engine, the triage agent with its attorney-approval interrupt on AgentCore Runtime, the operator console, the public door above, summons OCR (`POST /api/ocr`), Web Push on a real attorney interrupt (`GET /api/push/vapid`), custom `instanter.*` spans on the run receipt, and S3 Object Lock (Compliance, 30 days) on the audit trail. The iOS app starts a count-only Live Activity at the interrupt. TestFlight build 14 (2026-08-26) includes the widget; join at https://testflight.apple.com/join/JqZ1wX25.
 
 ## Why
 
