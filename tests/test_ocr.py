@@ -66,6 +66,41 @@ def test_ocr_example_watermark_does_not_block_a_transcribed_date() -> None:
     assert "error" not in out
 
 
+def test_ocr_an_overridden_refusal_still_carries_the_models_reason() -> None:
+    """A transcribed date overrides a spurious refusal, but the objection is
+    evidence: the photographed page may not have been a summons at all."""
+    out = deadline_from_extract(
+        {
+            "service_date": "2026-08-08",
+            "service_method": "personal",
+            "refused": True,
+            "reason": "this looks like a rent demand notice",
+        }
+    )
+    assert out["computed_deadline"] == "2026-08-17"
+    assert out["model_refusal_reason"] == "this looks like a rent demand notice"
+
+
+def test_ocr_an_unparseable_stated_deadline_refuses_rather_than_vanishing() -> None:
+    """Under O.C.G.A. 44-7-51(b) a summons-stated date CONTROLS for the tenant.
+
+    Dropping an unparseable one silently would change the answer: the engine
+    would compute a later day with no conflict flag, and the earlier date that
+    binds the tenant would appear nowhere in the response.
+    """
+    out = deadline_from_extract(
+        {
+            "service_date": "2026-08-08",
+            "service_method": "personal",
+            "summons_stated_deadline": "Aug 15, 2026",
+            "refused": False,
+        }
+    )
+    assert out["error"] == "invalid_stated_deadline"
+    assert "computed_deadline" not in out
+    assert "Aug 15, 2026" in out["detail"]
+
+
 def test_ocr_unknown_method_still_uses_the_engine() -> None:
     out = deadline_from_extract(
         {

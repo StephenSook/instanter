@@ -107,7 +107,21 @@ def deadline_from_extract(extracted: dict[str, Any]) -> dict[str, Any]:
         try:
             stated_date = date.fromisoformat(str(stated))
         except ValueError:
-            stated_date = None
+            # NOT a silent None. Under O.C.G.A. 44-7-51(b) a summons-stated
+            # date CONTROLS for the tenant, so dropping an unparseable one
+            # would change the answer, not the metadata: the engine would
+            # compute a later day with no conflict flag and the earlier date
+            # that binds the tenant would appear nowhere. Same posture as an
+            # unparseable service date three checks up.
+            return {
+                "error": "invalid_stated_deadline",
+                "detail": (
+                    f"{stated!r} is not an ISO date. The summons-stated deadline "
+                    "can control under O.C.G.A. 44-7-51(b), so it is never "
+                    "silently dropped."
+                ),
+                "extracted": extracted,
+            }
     case = CaseInput(
         case_id=str(extracted.get("case_id") or "ocr-summons"),
         jurisdiction_id=GEORGIA_RULE.jurisdiction_id,
@@ -116,7 +130,7 @@ def deadline_from_extract(extracted: dict[str, Any]) -> dict[str, Any]:
         summons_stated_deadline=stated_date,
     )
     result = compute_deadline(case, GEORGIA_RULE)
-    return {
+    payload: dict[str, Any] = {
         "extracted": {
             "service_date": service_date.isoformat(),
             "service_method": method.value,
@@ -142,6 +156,13 @@ def deadline_from_extract(extracted: dict[str, Any]) -> dict[str, Any]:
         "trace": [{"day": step.day.isoformat(), "label": step.label} for step in result.trace],
         "label": "EXAMPLE DATA: extracted from an image you supplied, then computed by the engine.",
     }
+    if extracted.get("refused"):
+        # A transcribed date overrides a spurious refusal (commit 71b9f28,
+        # after Nova refused the EXAMPLE DATA watermark), but the objection
+        # itself is evidence the caller must see: it may mean the photographed
+        # page was not a summons at all.
+        payload["model_refusal_reason"] = str(extracted.get("reason") or "the model objected")[:300]
+    return payload
 
 
 def handle_ocr(body: dict[str, Any], converse: Any) -> dict[str, Any]:
