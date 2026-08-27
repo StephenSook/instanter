@@ -48,6 +48,8 @@ export interface Case {
 export interface QueueSnapshot {
   generated_by: string;
   source?: "live" | "snapshot";
+  /** Present on a live recompute: how long the engine plus ladder took. */
+  elapsed_ms?: number;
   run_date: string;
   attorney_capacity: number;
   label: string;

@@ -72,7 +72,17 @@ export function Cabinet({ snapshot, onOpen }: { snapshot: QueueSnapshot; onOpen:
           <Stat label="Cases swept" value={snapshot.counts.total} />
           <Stat label="Interrupts" value={snapshot.counts.interrupt} tone="var(--color-l1)" />
           <Stat label="Flagged" value={snapshot.counts.flagged} tone="var(--color-flag)" />
-          <Stat label="Audit events" value={snapshot.counts.audit_events} />
+          {/* A live recompute is stateless and writes no audit events, so a
+              hardcoded 0 here read as breakage. Only the snapshot of a real
+              run carries the count; live shows its own measured duration. */}
+          <Stat
+            label={snapshot.source === "snapshot" ? "Audit events" : "Recomputed in"}
+            value={
+              snapshot.source === "snapshot"
+                ? snapshot.counts.audit_events
+                : `${(snapshot.elapsed_ms ?? 0) < 10 ? "~" : ""}${Math.max(1, Math.round(snapshot.elapsed_ms ?? 0))} ms`
+            }
+          />
         </dl>
       </div>
 
@@ -93,7 +103,7 @@ export function Cabinet({ snapshot, onOpen }: { snapshot: QueueSnapshot; onOpen:
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: number; tone?: string }) {
+function Stat({ label, value, tone }: { label: string; value: number | string; tone?: string }) {
   return (
     <div>
       <dt className="font-mono text-[0.62rem] tracking-[0.2em] text-white/60 uppercase">{label}</dt>
