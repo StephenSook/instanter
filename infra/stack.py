@@ -91,6 +91,12 @@ class JudgeDoorStack(cdk.Stack):
             partition_key=dynamodb.Attribute(name="endpoint", type=dynamodb.AttributeType.STRING),
             billing=dynamodb.Billing.on_demand(),
             removal_policy=cdk.RemovalPolicy.DESTROY,
+            # Push endpoints churn (reinstalls, revoked permission) and the
+            # subscribe cap is a hard 200, so without expiry the table fills
+            # with corpses until every new subscription is refused and every
+            # ping walks 200 dead endpoints. Rows also die early when the push
+            # service says Gone (push.py deletes them).
+            time_to_live_attribute="expires_at",
         )
 
         audit_lock = s3.Bucket(
@@ -284,6 +290,16 @@ class JudgeDoorStack(cdk.Stack):
                     origin=origins.FunctionUrlOrigin(
                         door_url,
                         custom_headers={"x-instanter-origin": origin_secret},
+                        # A sweep runs 25 to 35 seconds end to end, right at
+                        # CloudFront's 30-second default origin timeout, so
+                        # whether a judge's first click succeeded was decided
+                        # by variance: two live runs 504ed at the viewer while
+                        # the Lambda (120s) finished and parked the interrupt
+                        # where nobody could answer it. 60 is CloudFront's
+                        # no-quota-increase ceiling and clears the observed
+                        # worst case with the cold start included.
+                        read_timeout=cdk.Duration.seconds(60),
+                        keepalive_timeout=cdk.Duration.seconds(60),
                     ),
                     viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
