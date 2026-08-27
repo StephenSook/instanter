@@ -49,6 +49,28 @@ jobs:
       - name: Build
         run: npm run build
 
+  mobile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      # The mobile lane had zero automated verification: no job touched
+      # mobile/, so App.tsx could break and merge under a green check.
+      # tsc --noEmit exits non-zero on any type error (proven locally with a
+      # deliberate bad file before this job landed).
+      - name: Type check
+        run: npx tsc --noEmit
+
   gates:
     runs-on: ubuntu-latest
     timeout-minutes: 10
