@@ -7,6 +7,7 @@ must not carry case data.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -47,13 +48,23 @@ def save_subscription(table: Any, subscription: dict[str, Any]) -> dict[str, Any
             "p256dh": p256dh,
             "auth": auth,
             "created_at": int(time.time()),
+            # TTL. Without expiry, churned endpoints (reinstalls, revoked
+            # permission) accumulate until the cap refuses every new
+            # subscriber and every ping walks a table of corpses.
+            "expires_at": int(time.time()) + 180 * 24 * 3600,
         }
     )
     return {"ok": True}
 
 
 def notify_interrupt(table: Any) -> int:
-    """Send the no-case-data ping. Returns how many endpoints were attempted."""
+    """Send the no-case-data ping. Returns how many pushes were delivered.
+
+    Unset VAPID keys or table return 0, indistinguishable here from zero
+    subscribers on purpose: the vapid endpoint 503s when unconfigured, so
+    nobody can subscribe in that state. A CRASH is not handled here at all;
+    the caller catches it and surfaces push_error on the run result.
+    """
     if not VAPID_PRIVATE_KEY or not PUSH_TABLE:
         return 0
     try:
@@ -81,7 +92,15 @@ def notify_interrupt(table: Any) -> int:
                 ttl=120,
             )
             sent += 1
-        except WebPushException:
+        except WebPushException as exc:
+            # The push service said Gone (or Not Found): that endpoint is a
+            # corpse and will never deliver again. Delete it so it stops
+            # counting against the subscription cap.
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in (404, 410):
+                # Best-effort prune; the table's TTL is the backstop.
+                with contextlib.suppress(Exception):
+                    table.delete_item(Key={"endpoint": item["endpoint"]})
             continue
         except Exception:
             continue
