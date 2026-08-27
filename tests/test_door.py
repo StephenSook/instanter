@@ -26,6 +26,7 @@ if str(DOOR) not in sys.path:
     sys.path.insert(0, str(DOOR))
 
 import handler as door  # noqa: E402
+import lock as lock_mod  # noqa: E402
 import push as push_mod  # noqa: E402
 
 
@@ -893,3 +894,133 @@ def test_push_vapid_returns_the_public_key(monkeypatch: pytest.MonkeyPatch) -> N
     status, body = call("/api/push/vapid")
     assert status == 200
     assert body["publicKey"] == "BK_test_public"
+
+
+# --------------------------------------------- surfaced failures, not silent
+
+
+class _ReleaseFakeTable(_KeyedFakeTable):
+    def __init__(self) -> None:
+        super().__init__()
+        self.deleted: list[dict[str, Any]] = []
+
+    def delete_item(self, **kwargs: Any) -> dict[str, Any]:
+        self.deleted.append(kwargs["Key"])
+        return {}
+
+
+def test_a_failed_scheduled_sweep_releases_its_occurrence_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The raise triggers EventBridge's retry, but the retry is useless if it
+    finds its own occurrence already claimed and reports duplicate: True as a
+    success. A transiently failed 7am sweep must be able to actually retry."""
+    fake = _ReleaseFakeTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "RUNTIME_ARN", "")
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    with pytest.raises(RuntimeError, match="scheduled sweep failed"):
+        door.handler({"instanter_scheduled_sweep": True})
+    assert len(fake.deleted) == 1
+    assert str(fake.deleted[0]["run_id"]).startswith("__occurrence__")
+
+
+class _FakeInvokeBody:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._raw = json.dumps(payload).encode("utf-8")
+
+    def read(self) -> bytes:
+        return self._raw
+
+
+class _FakeAgentClient:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = payload
+
+    def invoke_agent_runtime(self, **_kwargs: Any) -> dict[str, Any]:
+        return {"response": _FakeInvokeBody(self._payload)}
+
+
+class _DecideFakeTable(_KeyedFakeTable):
+    def __init__(self, item: dict[str, Any]) -> None:
+        super().__init__()
+        self.item = item
+        self.updates: list[dict[str, Any]] = []
+
+    def get_item(self, **_kwargs: Any) -> dict[str, Any]:
+        return {"Item": self.item}
+
+    def update_item(self, **kwargs: Any) -> dict[str, Any]:
+        self.updates.append(kwargs)
+        return {}
+
+
+def test_a_decision_that_cannot_be_lock_recorded_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The attorney decision is the one event the Object Lock trail exists
+    for. A swallowed write failure would mean a week of 200s beside a
+    Compliance trail holding sweeps and zero decisions."""
+    stored = {"interrupts": [{"id": "i-1"}]}
+    fake = _DecideFakeTable(
+        {"run_id": "r1", "status": "awaiting_attorney", "result": json.dumps(stored)}
+    )
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+
+    class _Boto:
+        @staticmethod
+        def client(*_a: Any, **_k: Any) -> Any:
+            return _FakeAgentClient({"succeeded": True, "committed": ["26ED00101"]})
+
+    monkeypatch.setattr(door, "boto3", _Boto)
+
+    def _boom(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("the bucket said no")
+
+    monkeypatch.setattr(lock_mod, "lock_record", _boom)
+    status, body = call(
+        "/api/run/r1/decision", method="POST", body=json.dumps({"response": "approve"})
+    )
+    assert status == 200, "the decision itself still succeeded"
+    assert "the bucket said no" in body["audit_lock_error"]
+
+
+def test_a_crashed_push_notify_is_surfaced_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """push_sent: 0 with no error field would make a lost IAM grant look
+    exactly like an empty subscription table, forever."""
+    fake = _KeyedFakeTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+    monkeypatch.setattr(door, "claim_daily_run_slot", lambda _o: (True, 1))
+    monkeypatch.setenv("PUSH_TABLE", "push-table")
+
+    class _Boto:
+        @staticmethod
+        def client(*_a: Any, **_k: Any) -> Any:
+            return _FakeAgentClient({"interrupted": True, "awaiting": [{"case_id": "26ED00101"}]})
+
+        @staticmethod
+        def resource(*_a: Any, **_k: Any) -> Any:
+            class _R:
+                @staticmethod
+                def Table(_name: str) -> Any:  # noqa: N802 - mirrors the boto3 API
+                    return object()
+
+            return _R()
+
+    monkeypatch.setattr(door, "boto3", _Boto)
+    monkeypatch.setattr(lock_mod, "lock_record", lambda *_a, **_k: None)
+
+    def _boom(_table: Any) -> int:
+        raise RuntimeError("scan refused")
+
+    monkeypatch.setattr(push_mod, "notify_interrupt", _boom)
+    status, body = call("/api/run", method="POST", body=json.dumps({"capacity": 2}))
+    assert status == 202
+    assert body["result"]["push_sent"] == 0
+    assert "scan refused" in body["result"]["push_error"]

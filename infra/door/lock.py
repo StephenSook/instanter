@@ -18,7 +18,12 @@ RETAIN_DAYS = int(os.environ.get("AUDIT_LOCK_RETAIN_DAYS", "30"))
 
 def lock_record(kind: str, run_id: str, payload: dict[str, Any]) -> None:
     if not AUDIT_LOCK_BUCKET:
-        return
+        # RAISE, do not silently skip. LockedAuditSink takes the same stance
+        # and its docstring says why: a sink that claims to lock and quietly
+        # does not is the original lie. Callers catch this and surface it as
+        # audit_lock_error on the response, so a misconfigured deploy is
+        # visible on every run instead of discovered in a bucket audit.
+        raise RuntimeError("AUDIT_LOCK_BUCKET is unset; refusing to drop an audit record")
     import boto3
 
     now = datetime.now(UTC)

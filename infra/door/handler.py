@@ -4,7 +4,7 @@ ADR-0006 explains why this exists. `InvokeAgentRuntime` accepts only IAM SigV4
 or an OAuth bearer token, so a browser cannot reach the agent at all. This
 function holds the credential and invokes the runtime server-side.
 
-Four endpoints, and only one of them is the point:
+Eleven endpoints, and only one of them is the point:
 
 * ``GET  /api/health``          liveness, open, so an uptime check needs no secret.
 * ``GET  /api/stats``           **the checkable number.** Recomputes every answer
@@ -22,6 +22,8 @@ Four endpoints, and only one of them is the point:
                                 a sweep actually stops for an attorney.
 * ``POST /api/ocr``             photograph a summons; Nova Pro transcribes
                                 printed fields; the engine computes the deadline.
+* ``GET  /api/awaiting``        runs still owed a decision, as counts only: no
+                                run ids, because /decision is unauthenticated.
 * ``POST /api/run``             start a triage sweep on the deployed agent.
 * ``GET  /api/run/{id}``        poll it. The door polls because a managed Python
                                 Lambda cannot stream (ADR-0006).
@@ -35,7 +37,6 @@ is watching the product work rather than reading a number someone typed.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import time
@@ -631,13 +632,17 @@ def start_run(
         result = dict(result)
         result["audit_lock_error"] = str(exc)[:200]
     if status == "awaiting_attorney" and os.environ.get("PUSH_TABLE"):
-        sent = 0
-        with contextlib.suppress(Exception):
-            sent = door_push.notify_interrupt(
+        # A crashed notify must not break the run, but it must not read as
+        # "zero subscribers" either: a lost IAM grant would otherwise report
+        # push_sent: 0 forever while every phone stays silent.
+        result = dict(result)
+        try:
+            result["push_sent"] = door_push.notify_interrupt(
                 boto3.resource("dynamodb", region_name=REGION).Table(os.environ["PUSH_TABLE"])
             )
-        result = dict(result)
-        result["push_sent"] = sent
+        except Exception as exc:
+            result["push_sent"] = 0
+            result["push_error"] = str(exc)[:200]
     return _json(202, {"run_id": run_id, "status": status, "result": result})
 
 
@@ -705,9 +710,17 @@ def decide(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
         kind = "attorney_approved"
     elif lowered.startswith("defer"):
         kind = "attorney_deferred"
-    with contextlib.suppress(Exception):
+    payload_out: dict[str, Any] = {"run_id": run_id, "status": "resolved", "result": result}
+    try:
+        # The attorney decision is the one event the Object Lock trail exists
+        # for. A swallowed failure here means a week of decisions can return
+        # 200 while the Compliance trail records sweeps and zero decisions,
+        # so the failure rides the response the same way start_run surfaces
+        # its own lock failures.
         door_lock.lock_record(kind, run_id, {"status": "resolved"})
-    return _json(200, {"run_id": run_id, "status": "resolved", "result": result})
+    except Exception as exc:
+        payload_out["audit_lock_error"] = str(exc)[:200]
+    return _json(200, payload_out)
 
 
 # ------------------------------------------------------- the morning sweep
@@ -862,9 +875,20 @@ def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
         # the retry policy never fires. This used to return normally, and the
         # comment here claimed the opposite of what the code did, which meant a
         # sweep that never ran looked exactly like a sweep that did.
+        #
+        # And RELEASE THE CLAIM first, or the raise is self-defeating: the
+        # retry it triggers would find this occurrence already claimed and
+        # report duplicate: True as a success, so a transiently failed 7am
+        # sweep could never actually retry that day.
+        release_error = ""
+        try:
+            table().delete_item(Key={"run_id": f"__occurrence__{occurrence}"})
+        except Exception as exc:
+            release_error = f" (occurrence claim not released: {str(exc)[:100]})"
         raise RuntimeError(
             f"scheduled sweep failed: HTTP {response['statusCode']} "
             f"{payload.get('error') or payload.get('detail') or ''}".strip()
+            + release_error
         )
     return {
         "scheduled": True,
@@ -959,7 +983,14 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
                     ),
                 },
             )
-        converse = boto3.client("bedrock-runtime", region_name=REGION).converse
+        try:
+            # Constructed inside the try for the same reason start_run's
+            # client is: a client that fails to build (bad region, missing
+            # credentials) must surface as the route's own error, not escape
+            # as an opaque Lambda 500 after the daily slot was claimed.
+            converse = boto3.client("bedrock-runtime", region_name=REGION).converse
+        except Exception as exc:
+            return _json(502, {"error": "ocr_upstream", "detail": str(exc)[:400]})
         result = door_ocr.handle_ocr(body, converse)
         if result.get("error") == "ocr_upstream":
             return _json(502, result)
