@@ -13,9 +13,6 @@
         "ITSAppUsesNonExemptEncryption": false,
         "NSSupportsLiveActivities": true
       },
-      "entitlements": {
-        "com.apple.developer.usernotifications.live-activities": true
-      },
       "appleTeamId": "Y8XVCMLQCZ"
     },
     "android": {

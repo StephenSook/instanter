@@ -6,7 +6,4 @@ module.exports = {
   deploymentTarget: "16.4",
   bundleIdentifier: ".widget",
   frameworks: ["SwiftUI", "WidgetKit", "ActivityKit"],
-  entitlements: {
-    "com.apple.developer.usernotifications.live-activities": true,
-  },
 };
