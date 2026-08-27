@@ -35,7 +35,7 @@ packages = ["engine", "agent"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["cdk.out", "console", "mobile", "node_modules"]
+extend-exclude = ["cdk.out", "mobile", "node_modules"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]

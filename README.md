@@ -11,6 +11,7 @@ A background triage agent for eviction-defense clinics. It watches a clinic's in
 A three-minute walk for a judge: **<https://d2ew2t4uldglcr.cloudfront.net/judge>**.
 The 4 of 46 as lists you can count: **<https://d2ew2t4uldglcr.cloudfront.net/evidence>**.
 The filing cabinet, recomputed on this request: **<https://d2ew2t4uldglcr.cloudfront.net/api/queue>**.
+What if they were served on a date you pick: **<https://d2ew2t4uldglcr.cloudfront.net/api/what-if?service_date=2026-12-24>** (never capped; that date is the courthouse-closed trap).
 Photograph a summons: **<https://d2ew2t4uldglcr.cloudfront.net/#ocr>**. Nova Pro transcribes the printed service date; the engine computes the last day.
 
 **<https://d2ew2t4uldglcr.cloudfront.net/api/stats>** recomputes every answer deadline in the corpus on each request and reports what it found. Nothing there is cached or stored, so the numbers below are measured while you read them:
@@ -18,7 +19,7 @@ Photograph a summons: **<https://d2ew2t4uldglcr.cloudfront.net/#ocr>**. Nova Pro
 > **4 of 46 answer deadlines in the corpus are ones counting seven days by hand gets wrong.**
 > Three of them roll off a weekend under O.C.G.A. 1-3-1(d)(3). One is controlled by a summons stating a different date, which under O.C.G.A. 44-7-51(b) is the date that binds the tenant. A missed answer deadline in a dispossessory case is a default judgment, which is an eviction.
 
-The endpoint returns both lists in full, so the headline can be checked by counting rows. `infra/verify_door.sh` runs that check, and four others, from outside with no credentials.
+The endpoint returns both lists in full, so the headline can be checked by counting rows. `infra/verify_door.sh` runs that check, and seven others, from outside with no credentials.
 
 ### Run the agent yourself
 
@@ -41,6 +42,8 @@ Three answers, three different outcomes, and the third is the one worth trying:
 | `aprove` (a typo) | **not read as a decision.** The deterministic floor commits the cases for later review and the run reports failure, because no human actually decided. |
 
 Live runs are capped per day, because this endpoint spends money on a model. `/api/stats` is pure arithmetic and is never capped.
+
+`GET /api/awaiting` reports what is still owed a decision, as counts only. It deliberately publishes no run ids: `/decision` is unauthenticated, so a published id would let any stranger answer the clinic's morning sweep.
 
 ### On a phone
 
@@ -84,13 +87,12 @@ evals/     live evaluation harness plus the recorded run CI gates on
 seed/      synthetic intake, labelled EXAMPLE DATA in every record
 tests/     statutory test corpus for the engine, plus the agent's chaos and contract suites
 docs/      architecture decision records
-scripts/   CI gates (AI-tone, secret scanning wrappers)
+scripts/   the AI-tone CI gate and the console's queue-snapshot exporter
 infra/     the public judge door: CDK app, the door Lambda, and its outside-in verification
 spikes/    throwaway experiments kept for their findings, not their code
 web/       the operator console (React, Vite, Tailwind), deployed behind CloudFront
+mobile/    the attorney's phone app (Expo): iOS on TestFlight, Android as a release APK
 ```
-
-Further directories (bff, mobile) land as their phases ship.
 
 ## Development
 

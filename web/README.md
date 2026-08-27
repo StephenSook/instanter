@@ -1,32 +1,22 @@
-# React + TypeScript + Vite
+# Instanter operator console
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The web console a clinic operator watches: the live filing cabinet
+(`GET /api/queue`, recomputed per request), the checkable headline
+(`GET /api/stats`), Sweep the queue (a real agent run on Bedrock AgentCore
+that stops at the attorney interrupt), the what-if paper calendar, summons
+OCR intake, and Web Push opt-in for interrupt pings.
 
-Currently, two official plugins are available:
+React 19 + Vite + Tailwind. Every number rendered here is engine output
+fetched from the door; the UI never invents a date, a day count, or a rank.
+`public/queue.json` is a labelled snapshot used only when the door is
+unreachable, and the cabinet says so on screen when that happens.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```
+npm ci
+npm run lint
+npm test
+npm run build
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+CI runs exactly those commands (`.github/workflows/ci.yml`, job `web`). The
+built site deploys to S3 behind CloudFront via the CDK stack in `../infra`.

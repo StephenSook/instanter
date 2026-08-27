@@ -12,7 +12,7 @@ cd "$(dirname "$0")"
 
 if [ ! -f .easrc ]; then
   echo "Missing .easrc. It should export EXPO_ASC_API_KEY_PATH, EXPO_ASC_KEY_ID"
-  echo "and EXPO_ASC_ISSUER_ID. See docs/private/app-store-connect-readiness.md."
+  echo "and EXPO_ASC_ISSUER_ID."
   exit 1
 fi
 # shellcheck disable=SC1091

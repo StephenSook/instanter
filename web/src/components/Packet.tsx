@@ -9,7 +9,7 @@ import { BANDS, countdown, formatFlag, type Case } from "../data";
  *  The document is a court record, not a dashboard card. Everything
  *  printed on it is engine output: the statutory computation is shown day
  *  by day, the flags carry the engine's own reason texts, and the draft
- *  answer's defence fields are VISIBLY blank, which is the UPL boundary
+ *  answer's defense fields are VISIBLY blank, which is the UPL boundary
  *  made into something a reader can see. */
 export function Packet({
   caseRecord,
@@ -182,8 +182,8 @@ export function Packet({
                     Draft answer skeleton
                   </h3>
                   <p className="mt-2 font-serif text-[0.9rem] text-[var(--color-ink)]/75">
-                    Caption and dates are filled from the record above. Every defence field is left blank
-                    on purpose: selecting a defence is legal judgement, and only the reviewing attorney
+                    Caption and dates are filled from the record above. Every defense field is left blank
+                    on purpose: selecting a defense is legal judgment, and only the reviewing attorney
                     makes it.
                   </p>
                   <ul className="mt-3 space-y-2 font-mono text-[0.74rem]">

@@ -1,9 +1,14 @@
-"""Export one real deterministic sweep as the console's data snapshot.
+"""Export one real sweep as the console's fail-closed data snapshot.
 
-The web console renders ENGINE OUTPUT, never invented props: this script runs
-the same deterministic path CI runs, then writes every field the UI shows
+The web console renders ENGINE OUTPUT, never invented props. Its primary
+source is the live door (`GET /api/queue`); the snapshot this script writes
+is only the labelled fallback the cabinet shows when the door is
+unreachable. With AWS credentials this script prefers a LIVE sweep, so the
+snapshot carries real model rationales (`"mode": "live"`); without them it
+falls back to the deterministic path CI runs, and the rationale fields say
+[MODEL DISABLED] rather than pretending. Either way every field the UI shows
 (the ranked queue, each case's statutory computation trace, its flags with
-the engine's own reason texts, and the run's honest outcome) to
+the engine's own reason texts, and the run's honest outcome) goes to
 web/public/queue.json.
 
 Regenerate with:

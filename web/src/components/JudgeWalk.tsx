@@ -30,7 +30,7 @@ const STEPS: { n: string; title: string; body: string; href: string; external?: 
   {
     n: "04",
     title: "Open a packet",
-    body: "Case 26ED00101 is overdue. The packet is a court record: the trace is the engine's, the defence fields are blank on purpose.",
+    body: "Case 26ED00101 is overdue. The packet is a court record: the trace is the engine's, the defense fields are blank on purpose.",
     href: "/#/case/26ED00101",
   },
   {
