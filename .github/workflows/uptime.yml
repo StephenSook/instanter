@@ -1,0 +1,34 @@
+name: door uptime
+
+# The judge door is this submission's primary evidence and judging runs for weeks
+# with nobody watching it. A failed scheduled run sends GitHub's built-in failure
+# email to the repo owner, which is the whole alerting mechanism.
+#
+# The minutes are deliberately OFFSET rather than */20 or :00. GitHub deprioritises
+# schedules on round minutes under load, and a monitor that silently fires every
+# 80 minutes instead of every 20 is worse than none, because it looks healthy.
+# Verify this job by the NEWEST RUN'S AGE against the intended cadence, never by
+# the presence of green runs.
+
+on:
+  schedule:
+    - cron: "9,29,49 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: door-uptime
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # Bare exit path: no pipe, so the step's status is the script's status.
+      - name: Probe the public door
+        run: bash scripts/check_door.sh
