@@ -23,20 +23,24 @@ EXTRACT_PROMPT = (
     "Extract ONLY what is printed. Reply with JSON and nothing else: "
     '{"service_date":"YYYY-MM-DD"|null,"service_method":"personal"|"tack_and_mail"'
     '|"unknown","summons_stated_deadline":"YYYY-MM-DD"|null,"case_id":string|null,'
-    '"refused":bool,"reason":string}. '
-    "The page is labelled EXAMPLE DATA on purpose; that is not a reason to refuse. "
-    "If it is not a summons or a date is unreadable, refused=true. "
+    '"refused":bool,"reason":string,"refusal_code":"example_watermark"|'
+    '"not_a_summons"|"unreadable"|null}. '
+    "The page is labelled EXAMPLE DATA on purpose; that is not a reason to refuse, "
+    'but if you refuse ONLY because of that label, set refusal_code="example_watermark". '
+    "If the page is not a dispossessory summons at all, refused=true with "
+    'refusal_code="not_a_summons". If a date is unreadable, refused=true with '
+    'refusal_code="unreadable". '
     "Do not compute a deadline. Do not guess a missing date."
 )
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
-# The ONLY refusal a transcribed date may override: the spurious one Nova
-# raises about our own EXAMPLE DATA watermark (commit 71b9f28). Any other
-# refusal means the model thinks this is not a summons, and computing a
-# confident deadline from a rent demand or a ledger would be worse than no
-# answer. The pattern is exactly our label and nothing looser: a first cut
-# also matched "sample"/"synthetic", and a page titled SAMPLE RENT LEDGER
-# would have forced computation through its own refusal.
-_WATERMARK_REFUSAL = re.compile(r"example\s*data", re.IGNORECASE)
+# The ONLY refusal a transcribed date may override: the spurious one about our
+# own EXAMPLE DATA watermark (commit 71b9f28), identified by the STRUCTURED
+# refusal_code, never by matching free-form reason text. Two earlier cuts
+# proved text matching unsound: "sample" matched a SAMPLE RENT LEDGER's own
+# title, and even an exact "example data" pattern matched a reason that
+# merely mentioned the label while refusing for a real cause. A refusal
+# without the code fails closed.
+_OVERRIDABLE_REFUSAL_CODE = "example_watermark"
 
 
 def extract_summons_fields(image: bytes, media: str, converse: Any) -> dict[str, Any]:
@@ -94,7 +98,7 @@ def deadline_from_extract(extracted: dict[str, Any]) -> dict[str, Any]:
         }
     if extracted.get("refused"):
         reason = str(extracted.get("reason") or "")
-        if not _WATERMARK_REFUSAL.search(reason):
+        if str(extracted.get("refusal_code") or "") != _OVERRIDABLE_REFUSAL_CODE:
             # A refusal WITH a transcribed date used to compute anyway, which
             # let any dated document (a rent demand, a ledger) be presented as
             # a summons deadline even when the model correctly rejected it.

@@ -60,6 +60,7 @@ def test_ocr_example_watermark_does_not_block_a_transcribed_date() -> None:
             "service_method": "personal",
             "refused": True,
             "reason": "EXAMPLE DATA",
+            "refusal_code": "example_watermark",
         }
     )
     assert out["computed_deadline"] == "2026-08-17"
@@ -90,10 +91,39 @@ def test_ocr_a_watermark_refusal_computes_and_carries_the_reason() -> None:
             "service_method": "personal",
             "refused": True,
             "reason": "the page carries an EXAMPLE DATA watermark",
+            "refusal_code": "example_watermark",
         }
     )
     assert out["computed_deadline"] == "2026-08-17"
     assert "EXAMPLE DATA" in out["model_refusal_reason"]
+
+
+def test_ocr_a_reason_mentioning_the_label_cannot_smuggle_past_the_code() -> None:
+    """Round-3 finding: 'This is EXAMPLE DATA, but it is a rent ledger' matched
+    the text pattern. Only the STRUCTURED refusal_code opens the override."""
+    out = deadline_from_extract(
+        {
+            "service_date": "2026-08-08",
+            "service_method": "personal",
+            "refused": True,
+            "reason": "This is EXAMPLE DATA, but it is a rent ledger, not a summons",
+            "refusal_code": "not_a_summons",
+        }
+    )
+    assert out["error"] == "model_refused"
+    assert "computed_deadline" not in out
+
+
+def test_ocr_a_refusal_with_no_code_fails_closed() -> None:
+    out = deadline_from_extract(
+        {
+            "service_date": "2026-08-08",
+            "service_method": "personal",
+            "refused": True,
+            "reason": "EXAMPLE DATA",
+        }
+    )
+    assert out["error"] == "model_refused"
 
 
 def test_ocr_an_unparseable_stated_deadline_refuses_rather_than_vanishing() -> None:
