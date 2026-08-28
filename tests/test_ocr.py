@@ -66,9 +66,10 @@ def test_ocr_example_watermark_does_not_block_a_transcribed_date() -> None:
     assert "error" not in out
 
 
-def test_ocr_an_overridden_refusal_still_carries_the_models_reason() -> None:
-    """A transcribed date overrides a spurious refusal, but the objection is
-    evidence: the photographed page may not have been a summons at all."""
+def test_ocr_a_semantic_refusal_refuses_even_when_a_date_was_transcribed() -> None:
+    """A rent demand, a ledger, or any dated page the model rejects must not
+    become a confident summons deadline. Only the watermark refusal (the
+    spurious one about our own EXAMPLE DATA label) may be overridden."""
     out = deadline_from_extract(
         {
             "service_date": "2026-08-08",
@@ -77,8 +78,22 @@ def test_ocr_an_overridden_refusal_still_carries_the_models_reason() -> None:
             "reason": "this looks like a rent demand notice",
         }
     )
+    assert out["error"] == "model_refused"
+    assert "computed_deadline" not in out
+    assert "rent demand" in out["detail"]
+
+
+def test_ocr_a_watermark_refusal_computes_and_carries_the_reason() -> None:
+    out = deadline_from_extract(
+        {
+            "service_date": "2026-08-08",
+            "service_method": "personal",
+            "refused": True,
+            "reason": "the page carries an EXAMPLE DATA watermark",
+        }
+    )
     assert out["computed_deadline"] == "2026-08-17"
-    assert out["model_refusal_reason"] == "this looks like a rent demand notice"
+    assert "EXAMPLE DATA" in out["model_refusal_reason"]
 
 
 def test_ocr_an_unparseable_stated_deadline_refuses_rather_than_vanishing() -> None:

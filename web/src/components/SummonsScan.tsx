@@ -21,6 +21,9 @@ type Ready = {
   flags: { code: string; reason: string }[];
   trace: { day: string; label: string }[];
   label: string;
+  /** Present when a transcribed date overrode the model's watermark refusal:
+   *  the objection is evidence the reader must see. */
+  model_refusal_reason?: string;
 };
 
 type State = { k: "idle" } | { k: "working" } | { k: "ready"; result: Ready } | { k: "failed"; message: string };
@@ -143,6 +146,11 @@ export function SummonsScan() {
             <p className="mt-3 font-mono text-[0.62rem] text-[var(--color-ink-soft)]">
               {state.result.citation}
             </p>
+            {state.result.model_refusal_reason && (
+              <p className="mt-2 font-mono text-[0.62rem] text-[var(--color-flag)]">
+                The model objected before transcribing: {state.result.model_refusal_reason}
+              </p>
+            )}
           </div>
         )}
       </div>

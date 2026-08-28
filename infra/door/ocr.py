@@ -29,6 +29,13 @@ EXTRACT_PROMPT = (
     "Do not compute a deadline. Do not guess a missing date."
 )
 _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
+# The ONLY refusal a transcribed date may override: the spurious one Nova
+# raises about our own EXAMPLE DATA watermark (commit 71b9f28). Any other
+# refusal means the model thinks this is not a summons, and computing a
+# confident deadline from a rent demand or a ledger would be worse than no
+# answer. Machine-checkable on purpose: the exception is this pattern, not a
+# judgment call.
+_WATERMARK_REFUSAL = re.compile(r"example\s*data|watermark|synthetic|sample", re.IGNORECASE)
 
 
 def extract_summons_fields(image: bytes, media: str, converse: Any) -> dict[str, Any]:
@@ -84,6 +91,21 @@ def deadline_from_extract(extracted: dict[str, Any]) -> dict[str, Any]:
             ),
             "extracted": extracted,
         }
+    if extracted.get("refused"):
+        reason = str(extracted.get("reason") or "")
+        if not _WATERMARK_REFUSAL.search(reason):
+            # A refusal WITH a transcribed date used to compute anyway, which
+            # let any dated document (a rent demand, a ledger) be presented as
+            # a summons deadline even when the model correctly rejected it.
+            return {
+                "error": "model_refused",
+                "detail": (
+                    "The model refused to read this as a summons: "
+                    f"{reason or 'no reason given'}. No deadline is computed "
+                    "from a page the model rejected."
+                ),
+                "extracted": extracted,
+            }
     try:
         service_date = date.fromisoformat(str(raw_date))
     except ValueError:
