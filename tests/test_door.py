@@ -1088,7 +1088,10 @@ def test_a_runtime_error_envelope_is_never_persisted_as_resolved(
     released = [
         u
         for u in fake.updates
-        if u.get("ExpressionAttributeValues", {}).get(":a") == "awaiting_attorney"
+        # The CLAIM write also carries :a in its condition values, so filter
+        # on the release's own expression shape.
+        if "REMOVE deciding_at" in str(u.get("UpdateExpression"))
+        and u.get("ExpressionAttributeValues", {}).get(":a") == "awaiting_attorney"
     ]
     assert released, "the decision claim must be handed back"
 
@@ -1132,6 +1135,13 @@ def test_a_second_concurrent_decision_loses_loudly(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "ORIGIN_SECRET", "")
     monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+
+    class _Boto:
+        @staticmethod
+        def client(*_a: Any, **_k: Any) -> Any:
+            return _FakeAgentClient({"succeeded": True})
+
+    monkeypatch.setattr(door, "boto3", _Boto)
     status, body = call(
         "/api/run/r1/decision", method="POST", body=json.dumps({"response": "approve"})
     )
@@ -1162,3 +1172,95 @@ def test_an_empty_ocr_body_is_refused_before_a_paid_slot_is_claimed(
     assert status == 400
     assert body["error"] == "image_required"
     assert fake.counts == {}, "no daily OCR slot may be spent on an empty body"
+
+
+def test_a_client_construction_failure_leaves_no_stuck_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Round-2 finding: work that can fail without touching the runtime must
+    happen BEFORE the deciding claim, or the run is stuck for 130 seconds."""
+    fake = _ClaimFakeTable(_awaiting_item())
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+
+    class _Boto:
+        @staticmethod
+        def client(*_a: Any, **_k: Any) -> Any:
+            raise RuntimeError("no region, no client")
+
+    monkeypatch.setattr(door, "boto3", _Boto)
+    status, _ = call(
+        "/api/run/r1/decision", method="POST", body=json.dumps({"response": "approve"})
+    )
+    assert status == 502
+    assert fake.claimed is False, "the claim must not be taken before the client exists"
+
+
+def test_a_failed_final_write_after_a_landed_resume_keeps_the_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Round-2 finding: once the resume has executed on the runtime, releasing
+    the claim would invite a second resume of an already-resumed run. The row
+    stays deciding, deliberately, and the response says the write failed."""
+
+    class _FinalWriteFailsTable(_ClaimFakeTable):
+        def update_item(self, **kwargs: Any) -> dict[str, Any]:
+            values = kwargs.get("ExpressionAttributeValues", {})
+            if values.get(":s") == "resolved":
+                raise RuntimeError("dynamo said no")
+            return super().update_item(**kwargs)
+
+    fake = _FinalWriteFailsTable(_awaiting_item())
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+
+    class _Boto:
+        @staticmethod
+        def client(*_a: Any, **_k: Any) -> Any:
+            return _FakeAgentClient({"succeeded": True})
+
+    monkeypatch.setattr(door, "boto3", _Boto)
+    monkeypatch.setattr(lock_mod, "lock_record", lambda *_a, **_k: None)
+    status, body = call(
+        "/api/run/r1/decision", method="POST", body=json.dumps({"response": "approve"})
+    )
+    assert status == 200, "the decision itself executed"
+    assert "dynamo said no" in body["row_update_error"]
+    released = [
+        u
+        for u in fake.updates
+        # The CLAIM write also carries :a in its condition values, so filter
+        # on the release's own expression shape.
+        if "REMOVE deciding_at" in str(u.get("UpdateExpression"))
+        and u.get("ExpressionAttributeValues", {}).get(":a") == "awaiting_attorney"
+    ]
+    assert released == [], "the claim must NOT go back to awaiting after a landed resume"
+
+
+def test_the_occurrence_release_is_retried_through_a_transient_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Round-2 finding: a release that fails once suppresses every remaining
+    retry (they all see the claim and report duplicate: True as success)."""
+
+    class _FlakyReleaseTable(_KeyedFakeTable):
+        def __init__(self) -> None:
+            super().__init__()
+            self.delete_attempts = 0
+
+        def delete_item(self, **_kwargs: Any) -> dict[str, Any]:
+            self.delete_attempts += 1
+            if self.delete_attempts < 3:
+                raise RuntimeError("transient")
+            return {}
+
+    fake = _FlakyReleaseTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "RUNTIME_ARN", "")
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    with pytest.raises(RuntimeError, match="scheduled sweep failed") as excinfo:
+        door.handler({"instanter_scheduled_sweep": True})
+    assert fake.delete_attempts == 3
+    assert "not released" not in str(excinfo.value)

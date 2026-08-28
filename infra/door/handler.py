@@ -725,7 +725,39 @@ def decide(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
             409, {"error": "nothing_to_answer", "run_id": run_id, "status": item.get("status")}
         )
 
-    # CLAIM the decision before invoking anything. Two deciders (the web
+    # EVERYTHING that can fail without touching the runtime happens BEFORE the
+    # claim: the client construction, the interrupt id read, the capacity
+    # conversion. A failure here used to escape after the claim and leave the
+    # run stuck in "deciding" for the whole 130-second stale window.
+    interrupt_id = str(interrupts[0].get("id") or "") if isinstance(interrupts[0], dict) else ""
+    if not interrupt_id:
+        return _json(
+            409, {"error": "nothing_to_answer", "run_id": run_id, "status": item.get("status")}
+        )
+    try:
+        capacity = int(item.get("capacity", 2))
+    except (TypeError, ValueError):
+        capacity = 2  # a malformed legacy row resumes with the old default
+    try:
+        client = boto3.client("bedrock-agentcore", region_name=REGION)
+    except Exception as exc:
+        return _json(502, {"run_id": run_id, "error": str(exc)[:400]})
+    payload = {
+        "action": "resume",
+        "run_id": run_id,
+        "interrupt_id": interrupt_id,
+        "response": answer,
+        # The resume rebuilds context from these, so they must be the values
+        # the run STARTED with. Omitting them made the runtime default to
+        # capacity 2 and the corpus's frozen demo date, which re-ranked the
+        # queue and made the approval digest refuse the attorney's own answer
+        # on any run that used a real run_date or a different capacity.
+        "capacity": capacity,
+    }
+    if item.get("run_date"):
+        payload["run_date"] = str(item["run_date"])
+
+    # CLAIM the decision, last thing before the invoke. Two deciders (the web
     # console and the phone) answering the same run concurrently would both
     # resume the graph, and the last DynamoDB writer would win while the S3
     # state reflected the other execution. The conditional transition makes
@@ -757,21 +789,6 @@ def decide(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
             )
         raise
 
-    client = boto3.client("bedrock-agentcore", region_name=REGION)
-    payload = {
-        "action": "resume",
-        "run_id": run_id,
-        "interrupt_id": interrupts[0]["id"],
-        "response": answer,
-        # The resume rebuilds context from these, so they must be the values
-        # the run STARTED with. Omitting them made the runtime default to
-        # capacity 2 and the corpus's frozen demo date, which re-ranked the
-        # queue and made the approval digest refuse the attorney's own answer
-        # on any run that used a real run_date or a different capacity.
-        "capacity": int(item.get("capacity", 2)),
-    }
-    if item.get("run_date"):
-        payload["run_date"] = str(item["run_date"])
     try:
         response = client.invoke_agent_runtime(
             agentRuntimeArn=RUNTIME_ARN,
@@ -827,15 +844,31 @@ def decide(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
     if audit_lock_error:
         update_expr = "SET #s = :s, #r = :r, #a = :a, audit_lock_error = :e REMOVE deciding_at"
         values[":e"] = audit_lock_error
-    table().update_item(
-        Key={"run_id": run_id},
-        UpdateExpression=update_expr,
-        ExpressionAttributeNames=names,
-        ExpressionAttributeValues=values,
-    )
+    row_update_error = ""
+    for attempt in (1, 2):
+        try:
+            table().update_item(
+                Key={"run_id": run_id},
+                UpdateExpression=update_expr,
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=values,
+            )
+            row_update_error = ""
+            break
+        except Exception as exc:
+            # The resume has ALREADY executed and persisted on the runtime, so
+            # this row write failing must not release the claim back to
+            # awaiting: a re-claimed decide would resume an already-resumed
+            # run. Retry once; if it still fails, the row stays in "deciding"
+            # DELIBERATELY (the runtime rejects a second resume with an error
+            # envelope, which decide() refuses to persist) and the response
+            # says so.
+            row_update_error = f"attempt {attempt}: {str(exc)[:150]}"
     payload_out: dict[str, Any] = {"run_id": run_id, "status": "resolved", "result": result}
     if audit_lock_error:
         payload_out["audit_lock_error"] = audit_lock_error
+    if row_update_error:
+        payload_out["row_update_error"] = row_update_error
     return _json(200, payload_out)
 
 
@@ -995,12 +1028,17 @@ def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
         # And RELEASE THE CLAIM first, or the raise is self-defeating: the
         # retry it triggers would find this occurrence already claimed and
         # report duplicate: True as a success, so a transiently failed 7am
-        # sweep could never actually retry that day.
+        # sweep could never actually retry that day. The delete is retried,
+        # because a release that fails once suppresses EVERY remaining retry
+        # until the claim's own TTL.
         release_error = ""
-        try:
-            table().delete_item(Key={"run_id": f"__occurrence__{occurrence}"})
-        except Exception as exc:
-            release_error = f" (occurrence claim not released: {str(exc)[:100]})"
+        for _ in range(3):
+            try:
+                table().delete_item(Key={"run_id": f"__occurrence__{occurrence}"})
+                release_error = ""
+                break
+            except Exception as exc:
+                release_error = f" (occurrence claim not released: {str(exc)[:100]})"
         raise RuntimeError(
             f"scheduled sweep failed: HTTP {response['statusCode']} "
             f"{payload.get('error') or payload.get('detail') or ''}".strip()
