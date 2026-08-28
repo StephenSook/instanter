@@ -980,24 +980,60 @@ OCCURRENCE_CLAIMED = "claimed"
 OCCURRENCE_DONE = "done"
 OCCURRENCE_HELD = "held"
 
+# How old a claim must be before a retry may steal it. This number is pinned
+# between two hard timings and is wrong outside them, so it is named rather
+# than typed inline:
+#   * ABOVE the 120s Lambda ceiling, so a claimant that is merely slow is never
+#     robbed while it is still running.
+#   * BELOW the ~185s mark of Lambda's THIRD attempt, because Lambda waits one
+#     minute before the second attempt and two more before the third. A crash
+#     at t=5s therefore produces attempts at ~65s and ~185s; if the window
+#     exceeded 185s both would still read HELD, both function-error retries
+#     would be spent, and the sweep would be lost for the day.
+# See test_the_stale_window_survives_the_real_retry_timeline.
+OCCURRENCE_STALE_AFTER_SECONDS = 150
 
-def _release_occurrence(occurrence: str) -> str:
-    """Delete an occurrence claim so a retry can take it. Returns "" or a suffix.
+
+def _conditional_check_failed(exc: Exception) -> bool:
+    """Whether a DynamoDB error is a failed condition rather than a real fault."""
+    return "ConditionalCheckFailed" in type(exc).__name__ or "ConditionalCheckFailed" in str(exc)
+
+
+def _release_occurrence(occurrence: str, owner: str) -> str:
+    """Delete an occurrence claim WE STILL OWN. Returns "" or a suffix.
 
     Retried, because a release that fails once suppresses EVERY remaining retry
     until the claim's own TTL.
+
+    CONDITIONAL on the owner token, because an unconditional delete can erase a
+    REPLACEMENT owner's claim. If our first delete commits but its
+    acknowledgement is lost, the retry fires again; a concurrent at-least-once
+    delivery can legitimately claim the now-absent key in between, and the
+    retry would delete THAT claim, letting a third delivery claim and sweep the
+    same occurrence concurrently. The 120s ceiling does not help here, because
+    the replacement did not steal a stale lease: our own committed delete made
+    the key absent. A failed condition therefore means somebody else owns it
+    now, which is exactly when we must not delete, so it is a success.
     """
     release_error = ""
     for _ in range(3):
         try:
-            table().delete_item(Key={"run_id": f"__occurrence__{occurrence}"})
+            table().delete_item(
+                Key={"run_id": f"__occurrence__{occurrence}"},
+                ConditionExpression="#owner = :owner",
+                ExpressionAttributeNames={"#owner": "owner"},
+                ExpressionAttributeValues={":owner": owner},
+            )
             return ""
         except Exception as exc:
+            if _conditional_check_failed(exc):
+                # Ours is already gone, or a replacement owns it. Both fine.
+                return ""
             release_error = f" (occurrence claim not released: {str(exc)[:100]})"
     return release_error
 
 
-def claim_occurrence(occurrence: str) -> str:
+def claim_occurrence(occurrence: str, owner: str) -> str:
     """Claim one scheduled occurrence, as a crash-recoverable LEASE.
 
     EventBridge Scheduler delivers AT LEAST once, and asynchronous Lambda
@@ -1014,7 +1050,9 @@ def claim_occurrence(occurrence: str) -> str:
     (conditionally, so racing retries still elect exactly one winner).
 
     Returns which of the three states applies, because the caller must treat
-    them differently: DONE is a success, HELD is not (see scheduled_sweep).
+    them differently: DONE is a success, HELD is not (see scheduled_sweep). The
+    caller passes an `owner` token identifying THIS invocation, so it can later
+    release only a claim it still holds.
     """
     key = f"__occurrence__{occurrence}"
     now = int(time.time())
@@ -1023,34 +1061,35 @@ def claim_occurrence(occurrence: str) -> str:
             Item={
                 "run_id": key,
                 "claimed_at": now,
+                "owner": owner,
                 "expires_at": now + 3 * 24 * 3600,
             },
             ConditionExpression="attribute_not_exists(run_id)",
         )
         return OCCURRENCE_CLAIMED
     except Exception as exc:
-        conditional = "ConditionalCheckFailed" in type(exc).__name__ or (
-            "ConditionalCheckFailed" in str(exc)
-        )
-        if not conditional:
+        if not _conditional_check_failed(exc):
             raise
     row = table().get_item(Key={"run_id": key}).get("Item") or {}
     if row.get("sweep_done"):
         return OCCURRENCE_DONE
     claimed_at = int(row.get("claimed_at", 0))
-    if claimed_at >= now - 150:
+    if claimed_at >= now - OCCURRENCE_STALE_AFTER_SECONDS:
         # The claimant may still be running (Lambda ceiling is 120s).
         return OCCURRENCE_HELD
     try:
         table().update_item(
             Key={"run_id": key},
-            UpdateExpression="SET claimed_at = :now",
+            # Taking the lease takes OWNERSHIP too, or the dead claimant's token
+            # would still authorise a delete of our claim.
+            UpdateExpression="SET claimed_at = :now, #owner = :owner",
             ConditionExpression="claimed_at = :old AND attribute_not_exists(sweep_done)",
-            ExpressionAttributeValues={":now": now, ":old": claimed_at},
+            ExpressionAttributeNames={"#owner": "owner"},
+            ExpressionAttributeValues={":now": now, ":old": claimed_at, ":owner": owner},
         )
         return OCCURRENCE_CLAIMED
     except Exception as exc:
-        if "ConditionalCheckFailed" in type(exc).__name__ or "ConditionalCheckFailed" in str(exc):
+        if _conditional_check_failed(exc):
             return OCCURRENCE_HELD
         raise
 
@@ -1084,7 +1123,10 @@ def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
     scheduled_time = None if not raw_time or raw_time.startswith("<") else str(raw_time)
     occurrence = scheduled_time or datetime.now(COURT_TZ).strftime("%Y-%m-%dT%H")
 
-    state = claim_occurrence(occurrence)
+    # Identifies THIS invocation's hold on the lease, so the release below can
+    # only ever delete a claim we still own.
+    owner = uuid.uuid4().hex
+    state = claim_occurrence(occurrence, owner)
     if state == OCCURRENCE_DONE:
         # Genuinely complete. Report it and spend nothing.
         return {
@@ -1133,7 +1175,7 @@ def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
         # 4xx from start_run: an AgentCore throttle, a DynamoDB error, or a bad
         # capacity in the event all raise here within seconds, and every one of
         # them used to leave the claim standing.
-        release_error = _release_occurrence(occurrence)
+        release_error = _release_occurrence(occurrence, owner)
         if release_error:
             raise RuntimeError(f"{exc}{release_error}") from exc
         raise

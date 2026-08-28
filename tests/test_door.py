@@ -318,7 +318,7 @@ def test_a_scheduled_event_routes_to_the_sweep_and_not_to_http(
 ) -> None:
     """The whole point: the sweep runs without anyone pressing a button."""
     monkeypatch.setattr(door, "RUNTIME_ARN", "")
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o, _owner: door.OCCURRENCE_CLAIMED)
     # No runtime wired, so it refuses. It RAISES rather than returning, because
     # EventBridge invokes Lambda asynchronously and a statusCode inside a
     # returned object would be recorded as a successful delivery.
@@ -394,7 +394,7 @@ def test_a_run_records_which_origin_started_it(monkeypatch: pytest.MonkeyPatch) 
         raise RuntimeError("no network in tests")
 
     monkeypatch.setattr(boto3, "client", explode)
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o, _owner: door.OCCURRENCE_CLAIMED)
     # The invoke fails, so the sweep raises. The RUN row must still have been
     # written first, and must carry its origin.
     with pytest.raises(RuntimeError, match="scheduled sweep failed"):
@@ -564,7 +564,7 @@ def test_a_failed_scheduled_sweep_raises_rather_than_returning_success(
     code did.
     """
     monkeypatch.setattr(door, "RUNTIME_ARN", "")
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o, _owner: door.OCCURRENCE_CLAIMED)
     with pytest.raises(RuntimeError, match="scheduled sweep failed"):
         door.handler({"instanter_scheduled_sweep": True})
 
@@ -573,7 +573,7 @@ def test_a_capped_scheduled_sweep_also_raises(monkeypatch: pytest.MonkeyPatch) -
     fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 0)
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o, _owner: door.OCCURRENCE_CLAIMED)
     monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
     with pytest.raises(RuntimeError, match="scheduled sweep failed"):
         door.handler({"instanter_scheduled_sweep": True})
@@ -692,7 +692,7 @@ def test_the_scheduled_sweep_triages_the_court_local_day_not_the_frozen_demo_dat
         return {"statusCode": 202, "body": json.dumps({"run_id": "r1", "status": "complete"})}
 
     monkeypatch.setattr(door, "start_run", fake_start)
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o, _owner: door.OCCURRENCE_CLAIMED)
 
     # 11:00 UTC on 2026-09-09 is 07:00 in America/New_York, the same court day.
     door.handler({"instanter_scheduled_sweep": True, "scheduled_time": "2026-09-09T11:00:00Z"})
@@ -717,7 +717,7 @@ def test_a_late_utc_occurrence_still_resolves_to_the_right_court_day(
         return {"statusCode": 202, "body": json.dumps({"run_id": "r1", "status": "complete"})}
 
     monkeypatch.setattr(door, "start_run", fake_start)
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o, _owner: door.OCCURRENCE_CLAIMED)
     door.handler({"instanter_scheduled_sweep": True, "scheduled_time": "2026-09-10T01:00:00Z"})
     assert captured["run_date"] == "2026-09-09", "UTC date would have said the 10th"
 
@@ -735,7 +735,7 @@ def test_an_unsubstituted_scheduler_token_is_not_parsed_as_a_date(
         return {"statusCode": 202, "body": json.dumps({"run_id": "r1", "status": "complete"})}
 
     monkeypatch.setattr(door, "start_run", fake_start)
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o, _owner: door.OCCURRENCE_CLAIMED)
     door.handler(
         {"instanter_scheduled_sweep": True, "scheduled_time": "<aws.scheduler.scheduled-time>"}
     )
@@ -941,7 +941,7 @@ def test_a_failed_scheduled_sweep_releases_its_occurrence_claim(
     fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "RUNTIME_ARN", "")
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o, _owner: door.OCCURRENCE_CLAIMED)
     with pytest.raises(RuntimeError, match="scheduled sweep failed"):
         door.handler({"instanter_scheduled_sweep": True})
     assert len(fake.deleted) == 1
@@ -1282,7 +1282,7 @@ def test_the_occurrence_release_is_retried_through_a_transient_failure(
     fake = _FlakyReleaseTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "RUNTIME_ARN", "")
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o, _owner: door.OCCURRENCE_CLAIMED)
     with pytest.raises(RuntimeError, match="scheduled sweep failed") as excinfo:
         door.handler({"instanter_scheduled_sweep": True})
     assert fake.delete_attempts == 3
@@ -1322,8 +1322,8 @@ def test_the_runtimes_receipt_reconciles_instead_of_erroring(
 
 
 class _LeaseFakeTable:
-    """Implements exactly what claim_occurrence needs: conditional put,
-    get_item, conditional update."""
+    """Implements exactly what the lease needs: conditional put, get_item,
+    conditional update, and an OWNER-conditional delete."""
 
     class ConditionalCheckFailedException(Exception):  # noqa: N818 - boto3's name shape
         pass
@@ -1331,6 +1331,7 @@ class _LeaseFakeTable:
     def __init__(self, row: dict[str, Any] | None) -> None:
         self.row = row
         self.reclaimed = False
+        self.deletes = 0
 
     def put_item(self, **kwargs: Any) -> dict[str, Any]:
         if "ConditionExpression" in kwargs and self.row is not None:
@@ -1342,21 +1343,33 @@ class _LeaseFakeTable:
         return {"Item": dict(self.row)} if self.row else {}
 
     def update_item(self, **kwargs: Any) -> dict[str, Any]:
+        values = kwargs["ExpressionAttributeValues"]
         if "ConditionExpression" in kwargs:
             if self.row is None or self.row.get("sweep_done"):
                 raise self.ConditionalCheckFailedException("ConditionalCheckFailed")
-            if self.row.get("claimed_at") != kwargs["ExpressionAttributeValues"][":old"]:
+            if self.row.get("claimed_at") != values[":old"]:
                 raise self.ConditionalCheckFailedException("ConditionalCheckFailed")
         self.reclaimed = True
         self.row = dict(self.row or {})
-        self.row["claimed_at"] = kwargs["ExpressionAttributeValues"][":now"]
+        self.row["claimed_at"] = values[":now"]
+        if ":owner" in values:
+            self.row["owner"] = values[":owner"]
+        return {}
+
+    def delete_item(self, **kwargs: Any) -> dict[str, Any]:
+        self.deletes += 1
+        if "ConditionExpression" in kwargs:
+            owner = kwargs["ExpressionAttributeValues"][":owner"]
+            if self.row is None or self.row.get("owner") != owner:
+                raise self.ConditionalCheckFailedException("ConditionalCheckFailed")
+        self.row = None
         return {}
 
 
 def test_a_fresh_occurrence_is_claimed(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _LeaseFakeTable(None)
     monkeypatch.setattr(door, "table", lambda: fake)
-    assert door.claim_occurrence("2026-09-09T11:00:00Z") == door.OCCURRENCE_CLAIMED
+    assert door.claim_occurrence("2026-09-09T11:00:00Z", "owner-a") == door.OCCURRENCE_CLAIMED
 
 
 def test_a_live_claim_is_not_stolen(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1364,7 +1377,9 @@ def test_a_live_claim_is_not_stolen(monkeypatch: pytest.MonkeyPatch) -> None:
 
     fake = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 30})
     monkeypatch.setattr(door, "table", lambda: fake)
-    assert door.claim_occurrence("o") == door.OCCURRENCE_HELD, "the claimant may still be running"
+    assert door.claim_occurrence("o", "owner-a") == door.OCCURRENCE_HELD, (
+        "the claimant may still be running"
+    )
 
 
 def test_a_dead_claimants_lease_is_reclaimed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1375,7 +1390,7 @@ def test_a_dead_claimants_lease_is_reclaimed(monkeypatch: pytest.MonkeyPatch) ->
 
     fake = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 300})
     monkeypatch.setattr(door, "table", lambda: fake)
-    assert door.claim_occurrence("o") == door.OCCURRENCE_CLAIMED
+    assert door.claim_occurrence("o", "owner-a") == door.OCCURRENCE_CLAIMED
     assert fake.reclaimed is True
 
 
@@ -1384,7 +1399,7 @@ def test_a_finished_sweep_is_never_rerun(monkeypatch: pytest.MonkeyPatch) -> Non
 
     fake = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 300, "sweep_done": 1})
     monkeypatch.setattr(door, "table", lambda: fake)
-    assert door.claim_occurrence("o") == door.OCCURRENCE_DONE
+    assert door.claim_occurrence("o", "owner-a") == door.OCCURRENCE_DONE
 
 
 def test_held_and_done_are_not_the_same_answer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1400,10 +1415,87 @@ def test_held_and_done_are_not_the_same_answer(monkeypatch: pytest.MonkeyPatch) 
     held = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 30})
     done = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 30, "sweep_done": 1})
     monkeypatch.setattr(door, "table", lambda: held)
-    first = door.claim_occurrence("o")
+    first = door.claim_occurrence("o", "owner-a")
     monkeypatch.setattr(door, "table", lambda: done)
-    second = door.claim_occurrence("o")
+    second = door.claim_occurrence("o", "owner-a")
     assert first != second, "an unfinished holder must be distinguishable from a finished sweep"
+
+
+def test_a_lost_delete_acknowledgement_cannot_erase_a_replacements_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Round-5 finding, and the 120s ceiling does NOT protect this one.
+
+    The release is retried. If its first delete COMMITS but the acknowledgement
+    is lost, the retry fires again. A concurrent at-least-once delivery can
+    legitimately claim the now-absent key in between, and an unconditional
+    retry would delete THAT claim, leaving the occurrence unowned so a third
+    delivery could sweep it concurrently with the second. The replacement did
+    not steal a stale lease, so the Lambda ceiling is irrelevant here: our own
+    committed delete made the key absent.
+    """
+    fake = _LeaseFakeTable(None)
+    monkeypatch.setattr(door, "table", lambda: fake)
+
+    # A claims and then releases; the delete commits.
+    assert door.claim_occurrence("o", "owner-a") == door.OCCURRENCE_CLAIMED
+    assert door._release_occurrence("o", "owner-a") == ""
+    assert fake.row is None
+
+    # B, a concurrent delivery, legitimately claims the now-absent key.
+    assert door.claim_occurrence("o", "owner-b") == door.OCCURRENCE_CLAIMED
+    assert fake.row is not None
+
+    # A's retry (its first ack was lost) must NOT remove B's claim.
+    assert door._release_occurrence("o", "owner-a") == ""
+    assert fake.row is not None, "A's stale retry deleted the replacement owner's lease"
+    assert fake.row["owner"] == "owner-b"
+
+
+def test_stealing_a_dead_lease_takes_ownership_of_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Otherwise the dead claimant's token would still authorise a delete."""
+    import time as _time
+
+    fake = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 300, "owner": "dead"})
+    monkeypatch.setattr(door, "table", lambda: fake)
+    assert door.claim_occurrence("o", "owner-live") == door.OCCURRENCE_CLAIMED
+    assert fake.row is not None and fake.row["owner"] == "owner-live"
+    # The dead claimant coming back cannot release what it no longer owns.
+    assert door._release_occurrence("o", "dead") == ""
+    assert fake.row is not None, "a dead claimant's token released the live lease"
+
+
+def test_the_stale_window_survives_the_real_retry_timeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Round-5 finding: the previous pair of tests passed against a broken window.
+
+    Asserting only "65s is HELD" and "300s is reclaimable" leaves a 299s
+    threshold passing both while still losing the sweep, because a crash at
+    t=5s produces Lambda attempts at ~65s and ~185s and BOTH would read HELD,
+    spending the two function-error retries. Pin the actual timeline instead:
+    claimable at t=0, HELD at the second attempt, reclaimable by the third.
+    """
+    assert door.OCCURRENCE_STALE_AFTER_SECONDS > 120, "a slow claimant would be robbed mid-run"
+    assert door.OCCURRENCE_STALE_AFTER_SECONDS < 180, "the third attempt would still read HELD"
+
+    import time as _time
+
+    crashed_at = int(_time.time())
+    fake = _LeaseFakeTable(None)
+    monkeypatch.setattr(door, "table", lambda: fake)
+    assert door.claim_occurrence("o", "owner-a") == door.OCCURRENCE_CLAIMED
+
+    # The claimant dies at t=5s without releasing. Lambda's attempts follow.
+    for elapsed, expected, why in (
+        (65, door.OCCURRENCE_HELD, "second attempt, the holder could still be alive"),
+        (185, door.OCCURRENCE_CLAIMED, "third attempt, past the 120s ceiling: it is dead"),
+    ):
+        # handler.py does `import time`, so this is the same module object.
+        monkeypatch.setattr(_time, "time", lambda e=elapsed: crashed_at + e)
+        assert door.claim_occurrence("o", f"retry-{elapsed}") == expected, why
 
 
 def test_a_fast_crash_does_not_burn_lambdas_retries(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1439,7 +1531,7 @@ def test_any_in_process_death_releases_the_claim_not_just_a_4xx(
     """
     fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o, _owner: door.OCCURRENCE_CLAIMED)
 
     def boom(*_a: Any, **_k: Any) -> dict[str, Any]:
         raise RuntimeError("ThrottlingException: rate exceeded")
@@ -1457,7 +1549,7 @@ def test_a_bad_capacity_in_the_event_releases_the_claim(
     """int() raises BEFORE start_run is ever reached, inside the claim."""
     fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o, _owner: door.OCCURRENCE_CLAIMED)
     monkeypatch.setattr(
         door, "start_run", lambda *_a, **_k: pytest.fail("unreachable with a bad capacity")
     )
