@@ -255,11 +255,16 @@ class JudgeDoorStack(cdk.Stack):
                     }
                 ),
                 retry_policy=scheduler.CfnSchedule.RetryPolicyProperty(
-                    # One retry, not the default 185. A sweep that failed twice
-                    # should page a human, not spend the day retrying a paid
-                    # model call, and the handler's own scheduled cap of 2 is
-                    # the backstop if this is ever raised.
-                    maximum_retry_attempts=1,
+                    # Five retries inside the hour, not the default 185 and no
+                    # longer just 1: with the account's total Lambda
+                    # concurrency of 10 and no reserved capacity, a burst of
+                    # public traffic around 7am can throttle the scheduled
+                    # invocation, and a single retry could be throttled again.
+                    # Retries are idempotent-safe (the occurrence claim
+                    # deduplicates an at-least-once redelivery and is released
+                    # when a start FAILS) and spend is bounded by the
+                    # scheduled cap of 2 regardless of retry count.
+                    maximum_retry_attempts=5,
                     maximum_event_age_in_seconds=3600,
                 ),
             ),
