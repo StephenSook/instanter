@@ -318,7 +318,7 @@ def test_a_scheduled_event_routes_to_the_sweep_and_not_to_http(
 ) -> None:
     """The whole point: the sweep runs without anyone pressing a button."""
     monkeypatch.setattr(door, "RUNTIME_ARN", "")
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
     # No runtime wired, so it refuses. It RAISES rather than returning, because
     # EventBridge invokes Lambda asynchronously and a statusCode inside a
     # returned object would be recorded as a successful delivery.
@@ -359,7 +359,7 @@ def test_the_scheduled_budget_is_separate_from_the_visitor_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A busy day of visitors must not cancel the clinic's morning sweep."""
-    fake = _KeyedFakeTable()
+    fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "MAX_RUNS_PER_DAY", 1)
     monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 1)
@@ -374,7 +374,7 @@ def test_the_scheduled_budget_is_separate_from_the_visitor_budget(
 def test_the_scheduled_cap_refusal_reports_its_own_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake = _KeyedFakeTable()
+    fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 0)
     monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
@@ -385,7 +385,7 @@ def test_the_scheduled_cap_refusal_reports_its_own_cap(
 
 def test_a_run_records_which_origin_started_it(monkeypatch: pytest.MonkeyPatch) -> None:
     """Without this the awaiting list cannot say the sweep ran on its own."""
-    fake = _KeyedFakeTable()
+    fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 5)
     monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
@@ -394,7 +394,7 @@ def test_a_run_records_which_origin_started_it(monkeypatch: pytest.MonkeyPatch) 
         raise RuntimeError("no network in tests")
 
     monkeypatch.setattr(boto3, "client", explode)
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
     # The invoke fails, so the sweep raises. The RUN row must still have been
     # written first, and must carry its origin.
     with pytest.raises(RuntimeError, match="scheduled sweep failed"):
@@ -457,7 +457,7 @@ def test_a_client_that_cannot_be_built_is_a_502_and_not_a_crash(
     on "starting" forever, which is the silent-failure shape this door exists
     to avoid.
     """
-    fake = _KeyedFakeTable()
+    fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "MAX_RUNS_PER_DAY", 5)
     monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
@@ -564,16 +564,16 @@ def test_a_failed_scheduled_sweep_raises_rather_than_returning_success(
     code did.
     """
     monkeypatch.setattr(door, "RUNTIME_ARN", "")
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
     with pytest.raises(RuntimeError, match="scheduled sweep failed"):
         door.handler({"instanter_scheduled_sweep": True})
 
 
 def test_a_capped_scheduled_sweep_also_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    fake = _KeyedFakeTable()
+    fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 0)
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
     monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
     with pytest.raises(RuntimeError, match="scheduled sweep failed"):
         door.handler({"instanter_scheduled_sweep": True})
@@ -692,7 +692,7 @@ def test_the_scheduled_sweep_triages_the_court_local_day_not_the_frozen_demo_dat
         return {"statusCode": 202, "body": json.dumps({"run_id": "r1", "status": "complete"})}
 
     monkeypatch.setattr(door, "start_run", fake_start)
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
 
     # 11:00 UTC on 2026-09-09 is 07:00 in America/New_York, the same court day.
     door.handler({"instanter_scheduled_sweep": True, "scheduled_time": "2026-09-09T11:00:00Z"})
@@ -717,7 +717,7 @@ def test_a_late_utc_occurrence_still_resolves_to_the_right_court_day(
         return {"statusCode": 202, "body": json.dumps({"run_id": "r1", "status": "complete"})}
 
     monkeypatch.setattr(door, "start_run", fake_start)
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
     door.handler({"instanter_scheduled_sweep": True, "scheduled_time": "2026-09-10T01:00:00Z"})
     assert captured["run_date"] == "2026-09-09", "UTC date would have said the 10th"
 
@@ -735,7 +735,7 @@ def test_an_unsubstituted_scheduler_token_is_not_parsed_as_a_date(
         return {"statusCode": 202, "body": json.dumps({"run_id": "r1", "status": "complete"})}
 
     monkeypatch.setattr(door, "start_run", fake_start)
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
     door.handler(
         {"instanter_scheduled_sweep": True, "scheduled_time": "<aws.scheduler.scheduled-time>"}
     )
@@ -941,7 +941,7 @@ def test_a_failed_scheduled_sweep_releases_its_occurrence_claim(
     fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "RUNTIME_ARN", "")
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
     with pytest.raises(RuntimeError, match="scheduled sweep failed"):
         door.handler({"instanter_scheduled_sweep": True})
     assert len(fake.deleted) == 1
@@ -1015,7 +1015,7 @@ def test_a_crashed_push_notify_is_surfaced_not_swallowed(
 ) -> None:
     """push_sent: 0 with no error field would make a lost IAM grant look
     exactly like an empty subscription table, forever."""
-    fake = _KeyedFakeTable()
+    fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "ORIGIN_SECRET", "")
     monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
@@ -1175,7 +1175,7 @@ def test_a_second_concurrent_decision_loses_loudly(monkeypatch: pytest.MonkeyPat
 def test_garbage_capacity_is_refused_before_a_paid_slot_is_claimed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake = _KeyedFakeTable()
+    fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "ORIGIN_SECRET", "")
     monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
@@ -1188,7 +1188,7 @@ def test_garbage_capacity_is_refused_before_a_paid_slot_is_claimed(
 def test_an_empty_ocr_body_is_refused_before_a_paid_slot_is_claimed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake = _KeyedFakeTable()
+    fake = _ReleaseFakeTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "ORIGIN_SECRET", "")
     status, body = call("/api/ocr", method="POST", body=json.dumps({}))
@@ -1282,7 +1282,7 @@ def test_the_occurrence_release_is_retried_through_a_transient_failure(
     fake = _FlakyReleaseTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "RUNTIME_ARN", "")
-    monkeypatch.setattr(door, "claim_occurrence", lambda _o: True)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
     with pytest.raises(RuntimeError, match="scheduled sweep failed") as excinfo:
         door.handler({"instanter_scheduled_sweep": True})
     assert fake.delete_attempts == 3
@@ -1356,7 +1356,7 @@ class _LeaseFakeTable:
 def test_a_fresh_occurrence_is_claimed(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _LeaseFakeTable(None)
     monkeypatch.setattr(door, "table", lambda: fake)
-    assert door.claim_occurrence("2026-09-09T11:00:00Z") is True
+    assert door.claim_occurrence("2026-09-09T11:00:00Z") == door.OCCURRENCE_CLAIMED
 
 
 def test_a_live_claim_is_not_stolen(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1364,7 +1364,7 @@ def test_a_live_claim_is_not_stolen(monkeypatch: pytest.MonkeyPatch) -> None:
 
     fake = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 30})
     monkeypatch.setattr(door, "table", lambda: fake)
-    assert door.claim_occurrence("o") is False, "the claimant may still be running"
+    assert door.claim_occurrence("o") == door.OCCURRENCE_HELD, "the claimant may still be running"
 
 
 def test_a_dead_claimants_lease_is_reclaimed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1375,7 +1375,7 @@ def test_a_dead_claimants_lease_is_reclaimed(monkeypatch: pytest.MonkeyPatch) ->
 
     fake = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 300})
     monkeypatch.setattr(door, "table", lambda: fake)
-    assert door.claim_occurrence("o") is True
+    assert door.claim_occurrence("o") == door.OCCURRENCE_CLAIMED
     assert fake.reclaimed is True
 
 
@@ -1384,4 +1384,89 @@ def test_a_finished_sweep_is_never_rerun(monkeypatch: pytest.MonkeyPatch) -> Non
 
     fake = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 300, "sweep_done": 1})
     monkeypatch.setattr(door, "table", lambda: fake)
-    assert door.claim_occurrence("o") is False
+    assert door.claim_occurrence("o") == door.OCCURRENCE_DONE
+
+
+def test_held_and_done_are_not_the_same_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The round-4 finding, at its root.
+
+    A bool return collapsed "somebody holds this and has not finished" into the
+    same answer as "this occurrence is complete". The caller could only treat
+    both as a duplicate success, which is exactly how a dead claimant's retry
+    reported a sweep that never ran as a sweep that did.
+    """
+    import time as _time
+
+    held = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 30})
+    done = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 30, "sweep_done": 1})
+    monkeypatch.setattr(door, "table", lambda: held)
+    first = door.claim_occurrence("o")
+    monkeypatch.setattr(door, "table", lambda: done)
+    second = door.claim_occurrence("o")
+    assert first != second, "an unfinished holder must be distinguishable from a finished sweep"
+
+
+def test_a_fast_crash_does_not_burn_lambdas_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The round-4 finding, as the failure it actually causes.
+
+    AWS waits ONE MINUTE before Lambda's second attempt, but the lease is only
+    stealable after 150s. So a sweep that died at, say, t=5s left a claim that
+    was still only ~65s old when the retry looked. The retry was refused the
+    lease and used to return duplicate: True with a 200, which Lambda records as
+    a SUCCESS: the third attempt never happened and the 7am sweep silently never
+    ran that day. It must raise, so the event survives to the two-minute attempt
+    by which point the 120s Lambda ceiling guarantees the holder is dead.
+    """
+    import time as _time
+
+    fake = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 65})
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(
+        door, "start_run", lambda *_a, **_k: pytest.fail("a held occurrence must not spend a run")
+    )
+    with pytest.raises(RuntimeError, match="claimed but unfinished"):
+        door.handler({"instanter_scheduled_sweep": True, "scheduled_time": "2026-09-09T11:00:00Z"})
+
+
+def test_any_in_process_death_releases_the_claim_not_just_a_4xx(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only start_run returning >=400 used to release the claim.
+
+    An AgentCore throttle, a DynamoDB error, or a bad capacity in the event
+    RAISES instead, within seconds, and every one of those used to leave the
+    claim standing for the retry to trip over.
+    """
+    fake = _ReleaseFakeTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+
+    def boom(*_a: Any, **_k: Any) -> dict[str, Any]:
+        raise RuntimeError("ThrottlingException: rate exceeded")
+
+    monkeypatch.setattr(door, "start_run", boom)
+    with pytest.raises(RuntimeError, match="ThrottlingException"):
+        door.handler({"instanter_scheduled_sweep": True, "scheduled_time": "2026-09-09T11:00:00Z"})
+    assert fake.deleted, "the claim must be released so the retry can take it"
+    assert str(fake.deleted[0]["run_id"]).startswith("__occurrence__")
+
+
+def test_a_bad_capacity_in_the_event_releases_the_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """int() raises BEFORE start_run is ever reached, inside the claim."""
+    fake = _ReleaseFakeTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "claim_occurrence", lambda _o: door.OCCURRENCE_CLAIMED)
+    monkeypatch.setattr(
+        door, "start_run", lambda *_a, **_k: pytest.fail("unreachable with a bad capacity")
+    )
+    with pytest.raises(ValueError):
+        door.handler(
+            {
+                "instanter_scheduled_sweep": True,
+                "scheduled_time": "2026-09-09T11:00:00Z",
+                "capacity": "not-an-integer",
+            }
+        )
+    assert fake.deleted, "the claim must be released so the retry can take it"

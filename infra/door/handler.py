@@ -972,7 +972,32 @@ def list_awaiting() -> dict[str, Any]:
     }
 
 
-def claim_occurrence(occurrence: str) -> bool:
+# The three states a claim attempt can land in. They are deliberately NOT a
+# bool: collapsing "somebody else holds this and has not finished" into the
+# same answer as "this occurrence is already complete" is what let a dead
+# claimant's retry report success. See scheduled_sweep.
+OCCURRENCE_CLAIMED = "claimed"
+OCCURRENCE_DONE = "done"
+OCCURRENCE_HELD = "held"
+
+
+def _release_occurrence(occurrence: str) -> str:
+    """Delete an occurrence claim so a retry can take it. Returns "" or a suffix.
+
+    Retried, because a release that fails once suppresses EVERY remaining retry
+    until the claim's own TTL.
+    """
+    release_error = ""
+    for _ in range(3):
+        try:
+            table().delete_item(Key={"run_id": f"__occurrence__{occurrence}"})
+            return ""
+        except Exception as exc:
+            release_error = f" (occurrence claim not released: {str(exc)[:100]})"
+    return release_error
+
+
+def claim_occurrence(occurrence: str) -> str:
     """Claim one scheduled occurrence, as a crash-recoverable LEASE.
 
     EventBridge Scheduler delivers AT LEAST once, and asynchronous Lambda
@@ -987,6 +1012,9 @@ def claim_occurrence(occurrence: str) -> bool:
     day. The lease closes that: a claim with no sweep_done marker that is older
     than the Lambda ceiling belongs to a dead invocation and may be re-claimed
     (conditionally, so racing retries still elect exactly one winner).
+
+    Returns which of the three states applies, because the caller must treat
+    them differently: DONE is a success, HELD is not (see scheduled_sweep).
     """
     key = f"__occurrence__{occurrence}"
     now = int(time.time())
@@ -999,7 +1027,7 @@ def claim_occurrence(occurrence: str) -> bool:
             },
             ConditionExpression="attribute_not_exists(run_id)",
         )
-        return True
+        return OCCURRENCE_CLAIMED
     except Exception as exc:
         conditional = "ConditionalCheckFailed" in type(exc).__name__ or (
             "ConditionalCheckFailed" in str(exc)
@@ -1008,11 +1036,11 @@ def claim_occurrence(occurrence: str) -> bool:
             raise
     row = table().get_item(Key={"run_id": key}).get("Item") or {}
     if row.get("sweep_done"):
-        return False
+        return OCCURRENCE_DONE
     claimed_at = int(row.get("claimed_at", 0))
     if claimed_at >= now - 150:
         # The claimant may still be running (Lambda ceiling is 120s).
-        return False
+        return OCCURRENCE_HELD
     try:
         table().update_item(
             Key={"run_id": key},
@@ -1020,10 +1048,10 @@ def claim_occurrence(occurrence: str) -> bool:
             ConditionExpression="claimed_at = :old AND attribute_not_exists(sweep_done)",
             ExpressionAttributeValues={":now": now, ":old": claimed_at},
         )
-        return True
+        return OCCURRENCE_CLAIMED
     except Exception as exc:
         if "ConditionalCheckFailed" in type(exc).__name__ or "ConditionalCheckFailed" in str(exc):
-            return False
+            return OCCURRENCE_HELD
         raise
 
 
@@ -1056,8 +1084,9 @@ def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
     scheduled_time = None if not raw_time or raw_time.startswith("<") else str(raw_time)
     occurrence = scheduled_time or datetime.now(COURT_TZ).strftime("%Y-%m-%dT%H")
 
-    if not claim_occurrence(occurrence):
-        # Already ran for this occurrence. Report it and spend nothing.
+    state = claim_occurrence(occurrence)
+    if state == OCCURRENCE_DONE:
+        # Genuinely complete. Report it and spend nothing.
         return {
             "scheduled": True,
             "statusCode": 200,
@@ -1065,38 +1094,49 @@ def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
             "occurrence": occurrence,
             "detail": "this occurrence already ran; at-least-once delivery repeated it",
         }
-
-    run_date = court_today(scheduled_time)
-    body = {"capacity": int(event.get("capacity", 2))}
-    response = start_run(body, origin="scheduled", run_date=run_date)
-    payload = json.loads(response["body"])
-    if response["statusCode"] >= 400:
-        # RAISE, do not return. EventBridge Scheduler invokes Lambda
-        # asynchronously, so a statusCode sitting inside a returned object is
-        # not an invocation failure: the delivery is recorded as a success and
-        # the retry policy never fires. This used to return normally, and the
-        # comment here claimed the opposite of what the code did, which meant a
-        # sweep that never ran looked exactly like a sweep that did.
-        #
-        # And RELEASE THE CLAIM first, or the raise is self-defeating: the
-        # retry it triggers would find this occurrence already claimed and
-        # report duplicate: True as a success, so a transiently failed 7am
-        # sweep could never actually retry that day. The delete is retried,
-        # because a release that fails once suppresses EVERY remaining retry
-        # until the claim's own TTL.
-        release_error = ""
-        for _ in range(3):
-            try:
-                table().delete_item(Key={"run_id": f"__occurrence__{occurrence}"})
-                release_error = ""
-                break
-            except Exception as exc:
-                release_error = f" (occurrence claim not released: {str(exc)[:100]})"
+    if state == OCCURRENCE_HELD:
+        # Somebody holds the lease and has NOT marked it done. That is not a
+        # success, and returning one here is how a fast crash killed the day:
+        # Lambda waits ONE MINUTE before its second attempt, but the lease is
+        # only stealable after 150s, so any death before t=90s met a live-looking
+        # claim, answered duplicate: True with a 200, and Lambda recorded the
+        # retry as successful and never made its third attempt. Raising instead
+        # keeps the event alive until the two-minute attempt, by which point the
+        # 120s Lambda ceiling guarantees the holder is dead and the lease is
+        # stealable. A holder that is genuinely still running is unaffected: it
+        # marks sweep_done and the next delivery reads DONE above.
         raise RuntimeError(
-            f"scheduled sweep failed: HTTP {response['statusCode']} "
-            f"{payload.get('error') or payload.get('detail') or ''}".strip()
-            + release_error
+            f"scheduled sweep occurrence {occurrence} is claimed but unfinished; "
+            "retrying rather than reporting a sweep that never ran as a success"
         )
+
+    try:
+        run_date = court_today(scheduled_time)
+        body = {"capacity": int(event.get("capacity", 2))}
+        response = start_run(body, origin="scheduled", run_date=run_date)
+        payload = json.loads(response["body"])
+        if response["statusCode"] >= 400:
+            # RAISE, do not return. EventBridge Scheduler invokes Lambda
+            # asynchronously, so a statusCode sitting inside a returned object is
+            # not an invocation failure: the delivery is recorded as a success and
+            # the retry policy never fires. This used to return normally, and the
+            # comment here claimed the opposite of what the code did, which meant a
+            # sweep that never ran looked exactly like a sweep that did.
+            raise RuntimeError(
+                f"scheduled sweep failed: HTTP {response['statusCode']} "
+                f"{payload.get('error') or payload.get('detail') or ''}".strip()
+            )
+    except Exception as exc:
+        # RELEASE THE CLAIM on the way out, or the raise is self-defeating: the
+        # retry it triggers would find this occurrence claimed and, before the
+        # 150s window, refuse it. This covers EVERY in-process death, not just a
+        # 4xx from start_run: an AgentCore throttle, a DynamoDB error, or a bad
+        # capacity in the event all raise here within seconds, and every one of
+        # them used to leave the claim standing.
+        release_error = _release_occurrence(occurrence)
+        if release_error:
+            raise RuntimeError(f"{exc}{release_error}") from exc
+        raise
     # Mark the lease DONE so a late async redelivery cannot re-claim it after
     # the 150s stale window. Best-effort: if this write fails, the redelivery
     # would rerun a sweep that already succeeded, which the scheduled cap of 2
