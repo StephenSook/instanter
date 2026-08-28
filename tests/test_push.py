@@ -108,3 +108,35 @@ def test_notify_prunes_an_endpoint_the_push_service_says_is_gone(
     sent = door_push.notify_interrupt(table)
     assert sent == 0
     assert table.deleted == [{"endpoint": "https://push.example/dead"}]
+
+
+def test_notify_raises_when_every_delivery_fails_systemically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bad VAPID key fails every endpoint with 401/403. That must not read
+    as push_sent: 0, which is exactly what an empty table reports."""
+    import types
+
+    class _Resp:
+        status_code = 403
+
+    class _StubForbiddenError(Exception):
+        def __init__(self) -> None:
+            super().__init__("forbidden")
+            self.response = _Resp()
+
+    def _stub_webpush(**_kwargs: Any) -> None:
+        raise _StubForbiddenError()
+
+    stub = types.ModuleType("pywebpush")
+    stub.WebPushException = _StubForbiddenError  # type: ignore[attr-defined]
+    stub.webpush = _stub_webpush  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pywebpush", stub)
+    monkeypatch.setattr(door_push, "VAPID_PRIVATE_KEY", "k")
+    monkeypatch.setattr(door_push, "PUSH_TABLE", "t")
+
+    table = _Table()
+    table.items.append({"endpoint": "https://push.example/a", "p256dh": "a", "auth": "b"})
+    with pytest.raises(RuntimeError, match="HTTP 403"):
+        door_push.notify_interrupt(table)
+    assert table.deleted == [], "a systemic failure must not prune live endpoints"

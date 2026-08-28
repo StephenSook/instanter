@@ -72,6 +72,8 @@ def notify_interrupt(table: Any) -> int:
     except ImportError:
         return 0
     sent = 0
+    systemic = 0
+    first_error = ""
     scan = table.scan()
     items = list(scan.get("Items") or [])
     while scan.get("LastEvaluatedKey"):
@@ -93,15 +95,26 @@ def notify_interrupt(table: Any) -> int:
             )
             sent += 1
         except WebPushException as exc:
-            # The push service said Gone (or Not Found): that endpoint is a
-            # corpse and will never deliver again. Delete it so it stops
-            # counting against the subscription cap.
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status in (404, 410):
-                # Best-effort prune; the table's TTL is the backstop.
+                # The push service said Gone (or Not Found): that endpoint is
+                # a corpse and will never deliver again. Delete it so it stops
+                # counting against the subscription cap. EXPECTED churn, not a
+                # failure. Best-effort prune; the table's TTL is the backstop.
                 with contextlib.suppress(Exception):
                     table.delete_item(Key={"endpoint": item["endpoint"]})
+                continue
+            # 401/403/5xx are SYSTEMIC (a bad VAPID key fails every endpoint
+            # identically) and must not read as "zero subscribers".
+            systemic += 1
+            first_error = first_error or f"HTTP {status or '?'}: {str(exc)[:120]}"
             continue
-        except Exception:
+        except Exception as exc:
+            systemic += 1
+            first_error = first_error or str(exc)[:120]
             continue
+    if items and sent == 0 and systemic > 0:
+        # Total delivery failure. Raising lets the caller record push_error
+        # instead of a push_sent: 0 that looks exactly like an empty table.
+        raise RuntimeError(f"push delivery failed for all {systemic} endpoint(s): {first_error}")
     return sent
