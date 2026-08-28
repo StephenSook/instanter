@@ -294,6 +294,18 @@ def invoke(payload: dict[str, Any], context: Any = None) -> dict[str, Any]:
         restored = hydrate(run_id)
         if restored == 0:
             return {"error": "no_such_run", "run_id": run_id}
+        # The durable terminal receipt. Without it, a resume that LANDED but
+        # whose door-side record failed could be resumed again after the
+        # deciding claim went stale, and the graph would re-execute under a
+        # second, possibly different, answer. The first resolution is the
+        # only resolution; a duplicate resume gets the original report back.
+        marker = _run_dir(run_id) / "resolved.json"
+        if marker.exists():
+            return {
+                "error": "already_resolved",
+                "run_id": run_id,
+                "report": json.loads(marker.read_text()),
+            }
         ctx = build_context(run_id, run_date, capacity)
         _load_records(ctx)
         load_sidecar(ctx)
@@ -315,8 +327,12 @@ def invoke(payload: dict[str, Any], context: Any = None) -> dict[str, Any]:
             model_error = f"{type(exc).__name__}: {exc}"[:400]
         report = _finish_live(ctx, graph_status, model_error)
         save_sidecar(ctx)
+        out = report_dict(report, ctx.span_log)
+        # Written BEFORE persist so the receipt rides the same upload as the
+        # state it certifies.
+        (_run_dir(run_id) / "resolved.json").write_text(json.dumps(out, default=str))
         persist(run_id)
-        return report_dict(report, ctx.span_log)
+        return out
 
     return {"error": "unknown_action", "action": action}
 
