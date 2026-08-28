@@ -169,6 +169,16 @@ class JudgeDoorStack(cdk.Stack):
                 "VAPID_MAILTO": os.environ.get("VAPID_MAILTO", "mailto:stephensookra@gmail.com"),
             },
         )
+        # FUNCTION-ERROR retries for the scheduled sweep, explicit rather than
+        # implied. Scheduler's own retry_policy (below) covers only DELIVERY
+        # failures; a raise inside scheduled_sweep lands here. Two retries
+        # inside the hour: spend stays bounded by the scheduled daily cap of 2,
+        # and the occurrence claim is released on failure so a retry actually
+        # reruns instead of reporting duplicate: True.
+        door.configure_async_invoke(
+            retry_attempts=2,
+            max_event_age=cdk.Duration.hours(1),
+        )
         runs.grant_read_write_data(door)
         push.grant_read_write_data(door)
         audit_lock.grant_put(door)
@@ -255,14 +265,15 @@ class JudgeDoorStack(cdk.Stack):
                     }
                 ),
                 retry_policy=scheduler.CfnSchedule.RetryPolicyProperty(
-                    # Five retries inside the hour, not the default 185 and no
-                    # longer just 1: with the account's total Lambda
-                    # concurrency of 10 and no reserved capacity, a burst of
-                    # public traffic around 7am can throttle the scheduled
-                    # invocation, and a single retry could be throttled again.
-                    # Retries are idempotent-safe (the occurrence claim
-                    # deduplicates an at-least-once redelivery and is released
-                    # when a start FAILS) and spend is bounded by the
+                    # DELIVERY retries only. Scheduler invokes Lambda
+                    # asynchronously, so this policy governs failures to HAND
+                    # the event to Lambda (throttles when public traffic has
+                    # the account's 10 concurrent executions busy at 7am),
+                    # NOT function errors: a raise inside scheduled_sweep is
+                    # retried by Lambda's own async config, set explicitly on
+                    # the function below. Retries are idempotent-safe (the
+                    # occurrence claim deduplicates redelivery and is released
+                    # when a start fails) and spend stays bounded by the
                     # scheduled cap of 2 regardless of retry count.
                     maximum_retry_attempts=5,
                     maximum_event_age_in_seconds=3600,
