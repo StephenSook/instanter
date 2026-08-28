@@ -439,8 +439,8 @@ def main() -> None:
         # level goal success is deliberately NOT judged by a model: the
         # ExpectedRunShape evaluator verifies it against exact deterministic
         # ground truth, which is stronger. (GoalSuccessRateEvaluator needs a
-        # Session trajectory from OTel spans; revisit when the Phase C
-        # observability wiring produces those spans anyway.)
+        # Session trajectory assembled from OTel spans, which this harness
+        # does not collect; the deterministic check does not need it.)
         evaluators.append(
             OutputEvaluator(rubric=RATIONALE_RUBRIC, model=judge, name="rationale-quality")
         )

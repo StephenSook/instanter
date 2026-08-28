@@ -573,8 +573,8 @@ def build_tools(ctx: RunContext) -> dict[str, Any]:
             # The FULL record, storage metadata excluded: a same-key row
             # whose lifecycle already moved (status "deferred", an attorney
             # note) is NOT this run's pending commit and must conflict, not
-            # satisfy. (Lifecycle transitions become store operations in
-            # the Phase C DynamoDB model; within a run, exact match only.)
+            # satisfy. (A storage-backed model would express lifecycle
+            # transitions as store operations; within a run, exact match only.)
             return (
                 record.disposition,
                 record.rank,

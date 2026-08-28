@@ -249,8 +249,8 @@ class CaseStore(Protocol):
         reservation records the manifest durably and returns it; every
         later call returns the ORIGINAL stored manifest unchanged. The
         caller compares the returned manifest with its own and fails
-        closed on any difference. (The Phase C DynamoDB store makes this a
-        conditional write.)"""
+        closed on any difference. (A DynamoDB-backed store would express
+        this as a conditional write; the file store holds a lock.)"""
         ...
 
 
@@ -389,9 +389,9 @@ class JsonFileCaseStore:
         the same run can never produce two rows for one case. A record that
         already exists is an idempotent no-op. Flush + fsync inside the
         lock: the row either exists durably or this raises into
-        commit_escalations' loud partial-failure handler. (The Phase C
-        DynamoDB store makes this a conditional write; this is the
-        local-mode equivalent.)"""
+        commit_escalations' loud partial-failure handler. (A DynamoDB-backed
+        store would express this as a conditional write; a lock plus fsync is
+        the file-store equivalent.)"""
         payload = asdict(escalation)
         payload["recorded_at"] = datetime.now().astimezone().isoformat()
         with self._escalations_path.open("a+") as handle:

@@ -264,9 +264,10 @@ def run_live(
     ``attorney_response`` is deliberately required, never defaulted: a live
     path that auto-approves its own human interrupt is not human-in-the-
     loop. The caller supplies the human's actual response (the console in
-    the deployed product; an explicit flag in the demo harness), and the
-    multi-day persist-and-reinvoke wait ships with the Phase C
-    infrastructure. ``plugins`` passes through for the evals chaos harness.
+    the deployed product; an explicit flag in the demo harness). The wait
+    itself is not this function's job: in the deployed runtime the interrupted
+    run's state persists to S3, so the answer can arrive from a different
+    process. ``plugins`` passes through for the evals chaos harness.
     """
     from strands.multiagent import Status
     from strands.types.interrupt import InterruptResponseContent

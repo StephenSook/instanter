@@ -54,8 +54,9 @@ class JsonlAuditSink:
         # tail or a broken sequence must stop consequential processing at
         # the append, not lie dormant until something happens to read the
         # trail back. The fsync makes the line durable before the lock
-        # releases. (The Phase C sink moves allocation into atomic storage;
-        # this is the local-mode equivalent, sized for local-mode files.)
+        # releases. (A storage-backed sink would get sequence allocation from
+        # the store itself; a lock plus fsync is the file equivalent, sized
+        # for the local trail this writes.)
         with self._path.open("a+") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:
