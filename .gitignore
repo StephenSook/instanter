@@ -80,3 +80,6 @@ infra/.door-secret
 # deploy outputs: the CloudFront URL is public, the Function URL need not be
 infra/cdk-outputs.json
 infra/*.log
+
+# Research + transcript working material (never published)
+/DEMO VIDEO

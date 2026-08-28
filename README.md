@@ -96,11 +96,23 @@ mobile/    the attorney's phone app (Expo): iOS on TestFlight, Android as a rele
 
 ## Development
 
+Prerequisites: [uv](https://docs.astral.sh/uv/) for the Python lane, Node 22 for the
+console and the phone app. Nothing else; the tests need no AWS account and no network.
+
 ```
+git clone https://github.com/StephenSook/instanter.git && cd instanter
 uv sync --group dev
 uv run pytest
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
+
+Each command above is exactly what the CI job runs, on a bare exit path.
+
+The console has its own lane: see [web/README.md](web/README.md) for `npm ci`, the Vitest
+suite, and a local dev server. The phone app is Expo (`cd mobile && npm ci && npx expo
+start`); iOS ships through TestFlight and Android as a release APK on the repo's
+[Releases](https://github.com/StephenSook/instanter/releases). Deploying the public door
+is `infra/` (CDK); `infra/verify_door.sh` checks a deployed door from the outside in.
 
 ## License
 

@@ -94,15 +94,18 @@ on the exit path.
 
 ## Consequences
 
-- **The door is where the checkable number lives.** The playbook's strongest
-  winner-predictor is a live URL plus one measured figure a stranger can verify with no
-  key. The door must expose that figure on an unauthenticated endpoint that recomputes
-  it, in the user's currency rather than in milliseconds.
+- **The door is where the checkable number lives.** A claim nobody can check is not
+  evidence. The door must expose the headline figure on an unauthenticated endpoint that
+  recomputes it per request, stated in the clinic's own currency (deadlines a hand count
+  gets wrong) rather than in milliseconds, so a stranger with no key can count the rows
+  and disagree.
 - **`runtimeSessionId` has a 33 character minimum**, confirmed empirically in spike 0001
   by trying 32 and 33. The door generates these, so it must not use a short identifier.
-- **A pinned session should be pre-warmed before judging.** Spike 0001 measured cold
-  start at 4.1 to 5.1 seconds wall clock against 0.15 seconds warm, nearly all of it
-  microVM provisioning. A judge's first click must not pay that.
+- **A cold session costs a visitor several seconds on their first click.** Spike 0001
+  measured cold start at 4.1 to 5.1 seconds wall clock against 0.15 seconds warm, nearly
+  all of it microVM provisioning. AgentCore isolates a session per caller, so there is no
+  pool to pre-warm; the console shows an honest indeterminate loader instead of pretending
+  the wait is not happening.
 - **Every bucket the deployed agent touches needs an explicit execution role grant.**
   The generated role has none, and spike 0001 only surfaced that because the runtime was
   made to refuse a run it could not persist.

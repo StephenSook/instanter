@@ -28,8 +28,8 @@ That is the same work on A and on B. Strands documents the mechanism
 `S3SessionManager` is the distributed option), and interrupts propagate
 out of a `strands.multiagent` Graph, which is our topology.
 
-**What actually differs is the integration path and the rubric surface.**
-AgentCore has a documented Strands entrypoint (`BedrockAgentCoreApp` +
+**What actually differs is the integration path and how much we have to
+build ourselves.** AgentCore has a documented Strands entrypoint (`BedrockAgentCoreApp` +
 `@app.entrypoint`, with `agentcore create --framework Strands`
 scaffolding), has been GA since October 2025, and supports every primitive
 we need in us-east-1. Path A puts Runtime, Identity, and Observability on
