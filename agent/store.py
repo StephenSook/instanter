@@ -1,8 +1,9 @@
 """Case store: intake records in, escalation records out.
 
-Phase B ships the JSON-file implementation the demo seed uses; Phase C adds
-a DynamoDB implementation behind the same protocol (conditional-put
-idempotency lives there). Parsing intake into engine types happens HERE, on
+`JsonFileCaseStore` is the only implementation of the `CaseStore` protocol:
+the agent reads its case corpus from a file. Run-level durability is a
+separate concern and lives in the door Lambda's DynamoDB table, not behind
+this protocol. Parsing intake into engine types happens HERE, on
 purpose: serialized strings become real enums and dates at the boundary, so
 the frozen engine's fail-closed validation is the second line of defense,
 not the first.

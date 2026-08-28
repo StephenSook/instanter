@@ -1,9 +1,9 @@
 """Custom OpenTelemetry spans for the triage graph.
 
 Strands already traces model loops. These spans are ours: they name the
-deterministic work the rubric actually scores (deadline math, the ladder,
-the attorney interrupt) so AgentCore Observability shows more than a
-generic LLM call.
+deterministic work (deadline math, the escalation ladder, the attorney
+interrupt) so AgentCore Observability shows what the run actually did to
+each case rather than a flat sequence of generic LLM calls.
 
 Fail-soft on the tracer: a missing provider is a no-op span, never a
 crashed sweep. Never catch the wrapped body: the attorney interrupt is
