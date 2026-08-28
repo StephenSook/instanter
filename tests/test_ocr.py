@@ -136,3 +136,19 @@ def test_ocr_unknown_method_still_uses_the_engine() -> None:
     assert engine.computed_deadline is not None
     assert out["computed_deadline"] == engine.computed_deadline.isoformat()
     assert any(flag["code"] == "unknown_service_method" for flag in out["flags"])
+
+
+def test_ocr_a_page_calling_itself_a_sample_cannot_force_computation() -> None:
+    """Round-2 finding: the first watermark pattern also matched "sample", so
+    a page titled SAMPLE RENT LEDGER would have overridden its own refusal.
+    Only OUR exact label, EXAMPLE DATA, is overridable."""
+    out = deadline_from_extract(
+        {
+            "service_date": "2026-08-08",
+            "service_method": "personal",
+            "refused": True,
+            "reason": "this sample is a rent ledger, not a summons",
+        }
+    )
+    assert out["error"] == "model_refused"
+    assert "computed_deadline" not in out

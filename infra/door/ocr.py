@@ -33,9 +33,10 @@ _JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
 # raises about our own EXAMPLE DATA watermark (commit 71b9f28). Any other
 # refusal means the model thinks this is not a summons, and computing a
 # confident deadline from a rent demand or a ledger would be worse than no
-# answer. Machine-checkable on purpose: the exception is this pattern, not a
-# judgment call.
-_WATERMARK_REFUSAL = re.compile(r"example\s*data|watermark|synthetic|sample", re.IGNORECASE)
+# answer. The pattern is exactly our label and nothing looser: a first cut
+# also matched "sample"/"synthetic", and a page titled SAMPLE RENT LEDGER
+# would have forced computation through its own refusal.
+_WATERMARK_REFUSAL = re.compile(r"example\s*data", re.IGNORECASE)
 
 
 def extract_summons_fields(image: bytes, media: str, converse: Any) -> dict[str, Any]:
