@@ -608,43 +608,66 @@ def test_a_duplicate_scheduler_delivery_spends_nothing(
     """EventBridge Scheduler delivers AT LEAST once.
 
     Without an occurrence key a redelivery minted a fresh run_id and became a
-    second paid model run, and the scheduled cap of 2 permitted exactly that
-    rather than deduplicating it.
+    second paid model run. The contract since the lease landed: a redelivery
+    after a SUCCESSFUL sweep spends nothing (sweep_done blocks it), while a
+    redelivery after a FAILED start legitimately reruns, because the claim is
+    released on failure.
     """
 
     class _OnceTable(_KeyedFakeTable):
         def __init__(self) -> None:
             super().__init__()
-            self.claimed: set[str] = set()
+            self.rows: dict[str, dict[str, Any]] = {}
 
         def put_item(self, **kwargs: Any) -> dict[str, Any]:
             key = kwargs["Item"]["run_id"]
-            if "ConditionExpression" in kwargs:
-                if key in self.claimed:
-                    raise RuntimeError("ConditionalCheckFailedException")
-                self.claimed.add(key)
+            if "ConditionExpression" in kwargs and key in self.rows:
+                raise RuntimeError("ConditionalCheckFailedException")
+            self.rows[key] = dict(kwargs["Item"])
             return super().put_item(**kwargs)
+
+        def get_item(self, **kwargs: Any) -> dict[str, Any]:
+            key = kwargs["Key"]["run_id"]
+            return {"Item": dict(self.rows[key])} if key in self.rows else {}
+
+        def delete_item(self, **kwargs: Any) -> dict[str, Any]:
+            self.rows.pop(kwargs["Key"]["run_id"], None)
+            return {}
+
+        def update_item(self, **kwargs: Any) -> dict[str, Any]:
+            expr = str(kwargs.get("UpdateExpression", ""))
+            if "ADD" in expr:
+                return super().update_item(**kwargs)
+            key = kwargs["Key"]["run_id"]
+            if "sweep_done" in expr and key in self.rows:
+                self.rows[key]["sweep_done"] = 1
+            return {}
 
     fake = _OnceTable()
     monkeypatch.setattr(door, "table", lambda: fake)
     monkeypatch.setattr(door, "MAX_SCHEDULED_RUNS_PER_DAY", 5)
     monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
-
-    def explode(*_a: Any, **_k: Any) -> None:
-        raise AssertionError("a duplicate delivery must not reach the model")
+    monkeypatch.setattr(lock_mod, "lock_record", lambda *_a, **_k: None)
 
     event = {"instanter_scheduled_sweep": True, "scheduled_time": "2026-09-09T11:00:00Z"}
 
-    # First delivery claims the occurrence, then fails at the model (no network).
-    def _no_net(*_a: Any, **_k: Any) -> None:
-        raise RuntimeError("no net")
+    class _Boto:
+        @staticmethod
+        def client(*_a: Any, **_k: Any) -> Any:
+            return _FakeAgentClient({"interrupted": False, "succeeded": True})
 
-    monkeypatch.setattr(boto3, "client", _no_net)
-    with pytest.raises(RuntimeError):
-        door.handler(dict(event))
+    monkeypatch.setattr(door, "boto3", _Boto)
+    result = door.handler(dict(event))
+    assert result["duplicate"] is False
+    assert result["statusCode"] == 202
 
-    # Second delivery of the SAME occurrence must not construct a client at all.
-    monkeypatch.setattr(boto3, "client", explode)
+    # A redelivery of the SAME occurrence must not construct a client at all.
+    class _Exploding:
+        @staticmethod
+        def client(*_a: Any, **_k: Any) -> Any:
+            raise AssertionError("a duplicate delivery must not reach the model")
+
+    monkeypatch.setattr(door, "boto3", _Exploding)
     result = door.handler(dict(event))
     assert result["duplicate"] is True
     assert result["statusCode"] == 200
@@ -1264,3 +1287,101 @@ def test_the_occurrence_release_is_retried_through_a_transient_failure(
         door.handler({"instanter_scheduled_sweep": True})
     assert fake.delete_attempts == 3
     assert "not released" not in str(excinfo.value)
+
+
+def test_the_runtimes_receipt_reconciles_instead_of_erroring(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Round-3 finding: after a landed resume whose row write failed, a second
+    decide must not re-execute the graph. The runtime returns its durable
+    receipt and the door reconciles the row from the ORIGINAL report."""
+    fake = _ClaimFakeTable(_awaiting_item())
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+    prior_report = {"succeeded": True, "attorney_action": "approved", "committed": ["26ED00101"]}
+
+    class _Boto:
+        @staticmethod
+        def client(*_a: Any, **_k: Any) -> Any:
+            return _FakeAgentClient(
+                {"error": "already_resolved", "run_id": "r1", "report": prior_report}
+            )
+
+    monkeypatch.setattr(door, "boto3", _Boto)
+    status, body = call(
+        "/api/run/r1/decision", method="POST", body=json.dumps({"response": "defer: too late"})
+    )
+    assert status == 200
+    assert body["already_resolved"] is True
+    assert body["result"] == prior_report, "the FIRST resolution is the only resolution"
+    resolved = [
+        u for u in fake.updates if u.get("ExpressionAttributeValues", {}).get(":s") == "resolved"
+    ]
+    assert resolved, "the row must be reconciled from the receipt"
+
+
+class _LeaseFakeTable:
+    """Implements exactly what claim_occurrence needs: conditional put,
+    get_item, conditional update."""
+
+    class ConditionalCheckFailedException(Exception):  # noqa: N818 - boto3's name shape
+        pass
+
+    def __init__(self, row: dict[str, Any] | None) -> None:
+        self.row = row
+        self.reclaimed = False
+
+    def put_item(self, **kwargs: Any) -> dict[str, Any]:
+        if "ConditionExpression" in kwargs and self.row is not None:
+            raise self.ConditionalCheckFailedException("ConditionalCheckFailed")
+        self.row = kwargs["Item"]
+        return {}
+
+    def get_item(self, **_kwargs: Any) -> dict[str, Any]:
+        return {"Item": dict(self.row)} if self.row else {}
+
+    def update_item(self, **kwargs: Any) -> dict[str, Any]:
+        if "ConditionExpression" in kwargs:
+            if self.row is None or self.row.get("sweep_done"):
+                raise self.ConditionalCheckFailedException("ConditionalCheckFailed")
+            if self.row.get("claimed_at") != kwargs["ExpressionAttributeValues"][":old"]:
+                raise self.ConditionalCheckFailedException("ConditionalCheckFailed")
+        self.reclaimed = True
+        self.row = dict(self.row or {})
+        self.row["claimed_at"] = kwargs["ExpressionAttributeValues"][":now"]
+        return {}
+
+
+def test_a_fresh_occurrence_is_claimed(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _LeaseFakeTable(None)
+    monkeypatch.setattr(door, "table", lambda: fake)
+    assert door.claim_occurrence("2026-09-09T11:00:00Z") is True
+
+
+def test_a_live_claim_is_not_stolen(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time as _time
+
+    fake = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 30})
+    monkeypatch.setattr(door, "table", lambda: fake)
+    assert door.claim_occurrence("o") is False, "the claimant may still be running"
+
+
+def test_a_dead_claimants_lease_is_reclaimed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Round-3 finding: a Lambda that crashed after claiming could never
+    release, so every async retry reported duplicate: True and the sweep
+    silently never ran that day."""
+    import time as _time
+
+    fake = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 300})
+    monkeypatch.setattr(door, "table", lambda: fake)
+    assert door.claim_occurrence("o") is True
+    assert fake.reclaimed is True
+
+
+def test_a_finished_sweep_is_never_rerun(monkeypatch: pytest.MonkeyPatch) -> None:
+    import time as _time
+
+    fake = _LeaseFakeTable({"run_id": "x", "claimed_at": int(_time.time()) - 300, "sweep_done": 1})
+    monkeypatch.setattr(door, "table", lambda: fake)
+    assert door.claim_occurrence("o") is False

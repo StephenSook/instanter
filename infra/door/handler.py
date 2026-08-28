@@ -802,6 +802,31 @@ def decide(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
         _release_decision_claim(run_id)
         return _json(502, {"run_id": run_id, "error": str(exc)[:400]})
 
+    if isinstance(result, dict) and result.get("error") == "already_resolved":
+        # The runtime's durable receipt: a prior resume LANDED but its row
+        # write failed. Reconcile the row from the original report instead of
+        # refusing; the first resolution is the only resolution.
+        prior = result.get("report") if isinstance(result.get("report"), dict) else {}
+        with contextlib.suppress(Exception):
+            table().update_item(
+                Key={"run_id": run_id},
+                UpdateExpression="SET #s = :s, #r = :r REMOVE deciding_at",
+                ExpressionAttributeNames={"#s": "status", "#r": "result"},
+                ExpressionAttributeValues={
+                    ":s": "resolved",
+                    ":r": json.dumps(prior, default=str),
+                },
+            )
+        return _json(
+            200,
+            {
+                "run_id": run_id,
+                "status": "resolved",
+                "already_resolved": True,
+                "result": prior,
+            },
+        )
+
     if isinstance(result, dict) and result.get("error"):
         # The runtime answered with an application error (no_such_run when S3
         # state is gone, unknown_action, ...). Persisting THAT as resolved
@@ -948,7 +973,7 @@ def list_awaiting() -> dict[str, Any]:
 
 
 def claim_occurrence(occurrence: str) -> bool:
-    """Claim one scheduled occurrence exactly once, before spending anything.
+    """Claim one scheduled occurrence, as a crash-recoverable LEASE.
 
     EventBridge Scheduler delivers AT LEAST once, and asynchronous Lambda
     delivery can repeat an event even after it succeeded. Without this, a
@@ -956,16 +981,44 @@ def claim_occurrence(occurrence: str) -> bool:
     and a second awaiting row, and the scheduled cap of 2 permitted exactly
     that rather than deduplicating it.
 
-    A conditional write is the whole mechanism: the second writer loses.
+    A permanent claim is not enough: a Lambda that CRASHES or times out after
+    claiming can never release, and every async retry then found the claim and
+    reported duplicate: True as a success, so the sweep silently never ran that
+    day. The lease closes that: a claim with no sweep_done marker that is older
+    than the Lambda ceiling belongs to a dead invocation and may be re-claimed
+    (conditionally, so racing retries still elect exactly one winner).
     """
+    key = f"__occurrence__{occurrence}"
+    now = int(time.time())
     try:
         table().put_item(
             Item={
-                "run_id": f"__occurrence__{occurrence}",
-                "claimed_at": int(time.time()),
-                "expires_at": int(time.time()) + 3 * 24 * 3600,
+                "run_id": key,
+                "claimed_at": now,
+                "expires_at": now + 3 * 24 * 3600,
             },
             ConditionExpression="attribute_not_exists(run_id)",
+        )
+        return True
+    except Exception as exc:
+        conditional = "ConditionalCheckFailed" in type(exc).__name__ or (
+            "ConditionalCheckFailed" in str(exc)
+        )
+        if not conditional:
+            raise
+    row = table().get_item(Key={"run_id": key}).get("Item") or {}
+    if row.get("sweep_done"):
+        return False
+    claimed_at = int(row.get("claimed_at", 0))
+    if claimed_at >= now - 150:
+        # The claimant may still be running (Lambda ceiling is 120s).
+        return False
+    try:
+        table().update_item(
+            Key={"run_id": key},
+            UpdateExpression="SET claimed_at = :now",
+            ConditionExpression="claimed_at = :old AND attribute_not_exists(sweep_done)",
+            ExpressionAttributeValues={":now": now, ":old": claimed_at},
         )
         return True
     except Exception as exc:
@@ -1043,6 +1096,16 @@ def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
             f"scheduled sweep failed: HTTP {response['statusCode']} "
             f"{payload.get('error') or payload.get('detail') or ''}".strip()
             + release_error
+        )
+    # Mark the lease DONE so a late async redelivery cannot re-claim it after
+    # the 150s stale window. Best-effort: if this write fails, the redelivery
+    # would rerun a sweep that already succeeded, which the scheduled cap of 2
+    # bounds; that beats the inverse failure of a sweep that never reruns.
+    with contextlib.suppress(Exception):
+        table().update_item(
+            Key={"run_id": f"__occurrence__{occurrence}"},
+            UpdateExpression="SET sweep_done = :d",
+            ExpressionAttributeValues={":d": 1},
         )
     inner = payload.get("result") if isinstance(payload.get("result"), dict) else {}
     return {
