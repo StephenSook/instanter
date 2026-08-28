@@ -37,6 +37,7 @@ is watching the product work rather than reading a number someone typed.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import time
@@ -545,6 +546,23 @@ def start_run(
             },
         )
 
+    # Validate BEFORE claiming a slot. The claim counts against a daily paid
+    # budget, so 200 requests carrying {"capacity": "not-an-integer"} used to
+    # exhaust the cap while every one of them failed before AgentCore, and a
+    # judge arriving later got a 429 for someone else's garbage.
+    try:
+        capacity = int(body.get("capacity", 2))
+    except (TypeError, ValueError):
+        return _json(
+            400,
+            {"error": "invalid_capacity", "detail": "capacity must be an integer, 1 to 48."},
+        )
+    if not 1 <= capacity <= 48:
+        return _json(
+            400,
+            {"error": "invalid_capacity", "detail": "capacity must be an integer, 1 to 48."},
+        )
+
     allowed, used_today = claim_daily_run_slot(origin)
     if not allowed:
         # 429 with the numbers in it, so a judge who hits the cap knows this is
@@ -575,7 +593,7 @@ def start_run(
             "runtime_session_id": session,
             "created_at": now,
             "expires_at": now + 7 * 24 * 3600,
-            "capacity": int(body.get("capacity", 2)),
+            "capacity": capacity,
             **({"run_date": run_date} if run_date else {}),
         }
     )
@@ -583,7 +601,7 @@ def start_run(
     payload: dict[str, Any] = {
         "action": "start",
         "run_id": run_id,
-        "capacity": int(body.get("capacity", 2)),
+        "capacity": capacity,
     }
     if run_date:
         # Threaded through explicitly. Without it the agent falls back to the
@@ -643,6 +661,23 @@ def start_run(
         except Exception as exc:
             result["push_sent"] = 0
             result["push_error"] = str(exc)[:200]
+    # Persist the operational outcome to the ROW, not only to this response.
+    # The scheduled sweep's response goes to EventBridge, which reads none of
+    # it, so an AccessDenied on the Object Lock write at 7am would otherwise
+    # be an error nobody ever received.
+    ops = {
+        k: result[k]
+        for k in ("audit_lock_error", "push_sent", "push_error")
+        if isinstance(result, dict) and k in result
+    }
+    if ops:
+        # Best-effort: the response still carries the outcome.
+        with contextlib.suppress(Exception):
+            table().update_item(
+                Key={"run_id": run_id},
+                UpdateExpression="SET ops_report = :o",
+                ExpressionAttributeValues={":o": json.dumps(ops, default=str)},
+            )
     return _json(202, {"run_id": run_id, "status": status, "result": result})
 
 
@@ -656,6 +691,21 @@ def get_run(run_id: str) -> dict[str, Any]:
         payload["result"] = json.loads(raw)
     payload.pop("runtime_session_id", None)  # internal
     return _json(200, payload)
+
+
+def _release_decision_claim(run_id: str) -> None:
+    """Best-effort: hand the run back to awaiting_attorney after a failed resume.
+
+    A failed release is not retried; the stale-claim window in decide() is the
+    backstop that lets a later decider re-claim.
+    """
+    with contextlib.suppress(Exception):
+        table().update_item(
+            Key={"run_id": run_id},
+            UpdateExpression="SET #s = :a REMOVE deciding_at",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":a": "awaiting_attorney"},
+        )
 
 
 def decide(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -675,13 +725,53 @@ def decide(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
             409, {"error": "nothing_to_answer", "run_id": run_id, "status": item.get("status")}
         )
 
+    # CLAIM the decision before invoking anything. Two deciders (the web
+    # console and the phone) answering the same run concurrently would both
+    # resume the graph, and the last DynamoDB writer would win while the S3
+    # state reflected the other execution. The conditional transition makes
+    # the second caller lose loudly. A claim older than the Lambda ceiling
+    # (120s) belongs to a crashed decider and may be re-claimed.
+    now = int(time.time())
+    try:
+        table().update_item(
+            Key={"run_id": run_id},
+            UpdateExpression="SET #s = :d, deciding_at = :now",
+            ConditionExpression="#s = :a OR (#s = :d AND deciding_at < :stale)",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":d": "deciding",
+                ":a": "awaiting_attorney",
+                ":now": now,
+                ":stale": now - 130,
+            },
+        )
+    except Exception as exc:
+        if "ConditionalCheckFailed" in type(exc).__name__ or "ConditionalCheckFailed" in str(exc):
+            return _json(
+                409,
+                {
+                    "error": "decision_in_progress",
+                    "run_id": run_id,
+                    "detail": "Another decision for this run is already being recorded.",
+                },
+            )
+        raise
+
     client = boto3.client("bedrock-agentcore", region_name=REGION)
     payload = {
         "action": "resume",
         "run_id": run_id,
         "interrupt_id": interrupts[0]["id"],
         "response": answer,
+        # The resume rebuilds context from these, so they must be the values
+        # the run STARTED with. Omitting them made the runtime default to
+        # capacity 2 and the corpus's frozen demo date, which re-ranked the
+        # queue and made the approval digest refuse the attorney's own answer
+        # on any run that used a real run_date or a different capacity.
+        "capacity": int(item.get("capacity", 2)),
     }
+    if item.get("run_date"):
+        payload["run_date"] = str(item["run_date"])
     try:
         response = client.invoke_agent_runtime(
             agentRuntimeArn=RUNTIME_ARN,
@@ -692,34 +782,60 @@ def decide(run_id: str, body: dict[str, Any]) -> dict[str, Any]:
         )
         result = attach_steps(json.loads(response["response"].read()))
     except Exception as exc:
+        _release_decision_claim(run_id)
         return _json(502, {"run_id": run_id, "error": str(exc)[:400]})
 
-    table().update_item(
-        Key={"run_id": run_id},
-        UpdateExpression="SET #s = :s, #r = :r, #a = :a",
-        ExpressionAttributeNames={"#s": "status", "#r": "result", "#a": "attorney_response"},
-        ExpressionAttributeValues={
-            ":s": "resolved",
-            ":r": json.dumps(result, default=str),
-            ":a": answer[:2000],
-        },
-    )
+    if isinstance(result, dict) and result.get("error"):
+        # The runtime answered with an application error (no_such_run when S3
+        # state is gone, unknown_action, ...). Persisting THAT as resolved
+        # would record a decision that never executed, so the run goes back to
+        # awaiting and the caller hears the runtime's own words.
+        _release_decision_claim(run_id)
+        return _json(
+            502,
+            {
+                "run_id": run_id,
+                "error": "agent_error",
+                "detail": str(result.get("error"))[:200],
+            },
+        )
+
     kind = "attorney_decision"
     lowered = answer.lower().strip()
     if lowered.startswith("approve"):
         kind = "attorney_approved"
     elif lowered.startswith("defer"):
         kind = "attorney_deferred"
-    payload_out: dict[str, Any] = {"run_id": run_id, "status": "resolved", "result": result}
+    audit_lock_error = ""
     try:
         # The attorney decision is the one event the Object Lock trail exists
         # for. A swallowed failure here means a week of decisions can return
-        # 200 while the Compliance trail records sweeps and zero decisions,
-        # so the failure rides the response the same way start_run surfaces
-        # its own lock failures.
+        # 200 while the Compliance trail records sweeps and zero decisions.
         door_lock.lock_record(kind, run_id, {"status": "resolved"})
     except Exception as exc:
-        payload_out["audit_lock_error"] = str(exc)[:200]
+        audit_lock_error = str(exc)[:200]
+
+    # One final write carrying the outcome AND the operational failure, so the
+    # row is evidence, not just this response nobody may be reading.
+    update_expr = "SET #s = :s, #r = :r, #a = :a REMOVE deciding_at"
+    names = {"#s": "status", "#r": "result", "#a": "attorney_response"}
+    values: dict[str, Any] = {
+        ":s": "resolved",
+        ":r": json.dumps(result, default=str),
+        ":a": answer[:2000],
+    }
+    if audit_lock_error:
+        update_expr = "SET #s = :s, #r = :r, #a = :a, audit_lock_error = :e REMOVE deciding_at"
+        values[":e"] = audit_lock_error
+    table().update_item(
+        Key={"run_id": run_id},
+        UpdateExpression=update_expr,
+        ExpressionAttributeNames=names,
+        ExpressionAttributeValues=values,
+    )
+    payload_out: dict[str, Any] = {"run_id": run_id, "status": "resolved", "result": result}
+    if audit_lock_error:
+        payload_out["audit_lock_error"] = audit_lock_error
     return _json(200, payload_out)
 
 
@@ -890,6 +1006,7 @@ def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
             f"{payload.get('error') or payload.get('detail') or ''}".strip()
             + release_error
         )
+    inner = payload.get("result") if isinstance(payload.get("result"), dict) else {}
     return {
         "scheduled": True,
         "statusCode": response["statusCode"],
@@ -899,6 +1016,11 @@ def scheduled_sweep(event: dict[str, Any]) -> dict[str, Any]:
         "run_id": payload.get("run_id"),
         "status": payload.get("status"),
         "error": payload.get("error"),
+        # Operational outcomes ride the EventBridge-visible return too; the
+        # row's ops_report is the durable copy.
+        "audit_lock_error": inner.get("audit_lock_error"),
+        "push_sent": inner.get("push_sent"),
+        "push_error": inner.get("push_error"),
     }
 
 
@@ -969,6 +1091,22 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
             return _json(400, saved)
         return _json(200, saved)
     if path == "/api/ocr" and method == "POST":
+        # Cheap validation BEFORE the slot claim: 200 empty bodies used to
+        # exhaust the day's OCR budget without ever reaching Nova.
+        raw_b64 = str(body.get("image_b64") or "")
+        if not raw_b64:
+            return _json(
+                400,
+                {
+                    "error": "image_required",
+                    "detail": "Pass image_b64. The engine will not invent a summons.",
+                },
+            )
+        if len(raw_b64) > 2_800_000:
+            return _json(
+                400,
+                {"error": "image_too_large", "detail": "Max 2MB after decode."},
+            )
         allowed, used_today = claim_daily_run_slot("ocr")
         if not allowed:
             return _json(
@@ -995,7 +1133,7 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
         if result.get("error") == "ocr_upstream":
             return _json(502, result)
         status = 200 if "computed_deadline" in result else 400
-        if result.get("error") == "summons_unreadable":
+        if result.get("error") in ("summons_unreadable", "model_refused"):
             status = 422
         return _json(status, result)
     if path == "/api/awaiting" and method == "GET":

@@ -1024,3 +1024,141 @@ def test_a_crashed_push_notify_is_surfaced_not_swallowed(
     assert status == 202
     assert body["result"]["push_sent"] == 0
     assert "scan refused" in body["result"]["push_error"]
+
+
+# ---------------------------------------------- the decision path, hardened
+
+
+class _ClaimFakeTable(_DecideFakeTable):
+    """Enforces the conditional decision claim: first claim wins, second loses."""
+
+    class ConditionalCheckFailedException(Exception):  # noqa: N818 - boto3's real name shape
+        pass
+
+    def __init__(self, item: dict[str, Any]) -> None:
+        super().__init__(item)
+        self.claimed = False
+
+    def update_item(self, **kwargs: Any) -> dict[str, Any]:
+        if "ConditionExpression" in kwargs:
+            if self.claimed:
+                raise self.ConditionalCheckFailedException("ConditionalCheckFailed")
+            self.claimed = True
+        self.updates.append(kwargs)
+        return {}
+
+
+def _awaiting_item() -> dict[str, Any]:
+    stored = {"interrupts": [{"id": "i-1"}]}
+    return {
+        "run_id": "r1",
+        "status": "awaiting_attorney",
+        "result": json.dumps(stored),
+        "capacity": 5,
+        "run_date": "2026-09-14",
+    }
+
+
+def test_a_runtime_error_envelope_is_never_persisted_as_resolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runtime returns {"error": "no_such_run"} when its S3 state is gone.
+    Recording THAT as resolved would store a decision that never executed."""
+    fake = _ClaimFakeTable(_awaiting_item())
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+
+    class _Boto:
+        @staticmethod
+        def client(*_a: Any, **_k: Any) -> Any:
+            return _FakeAgentClient({"error": "no_such_run", "run_id": "r1"})
+
+    monkeypatch.setattr(door, "boto3", _Boto)
+    status, body = call(
+        "/api/run/r1/decision", method="POST", body=json.dumps({"response": "approve"})
+    )
+    assert status == 502
+    assert body["error"] == "agent_error"
+    assert "no_such_run" in body["detail"]
+    resolved = [
+        u for u in fake.updates if u.get("ExpressionAttributeValues", {}).get(":s") == "resolved"
+    ]
+    assert resolved == [], "an agent error must never become a resolved row"
+    released = [
+        u
+        for u in fake.updates
+        if u.get("ExpressionAttributeValues", {}).get(":a") == "awaiting_attorney"
+    ]
+    assert released, "the decision claim must be handed back"
+
+
+def test_resume_carries_the_runs_own_capacity_and_run_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Omitting them made the runtime default to capacity 2 and the frozen seed
+    date, which re-ranked the queue and made the digest refuse the attorney's
+    own answer on any run started with different values."""
+    fake = _ClaimFakeTable(_awaiting_item())
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+    seen: dict[str, Any] = {}
+
+    class _CapturingClient:
+        @staticmethod
+        def invoke_agent_runtime(**kwargs: Any) -> dict[str, Any]:
+            seen.update(json.loads(kwargs["payload"].decode("utf-8")))
+            return {"response": _FakeInvokeBody({"succeeded": True})}
+
+    class _Boto:
+        @staticmethod
+        def client(*_a: Any, **_k: Any) -> Any:
+            return _CapturingClient()
+
+    monkeypatch.setattr(door, "boto3", _Boto)
+    monkeypatch.setattr(lock_mod, "lock_record", lambda *_a, **_k: None)
+    status, _ = call(
+        "/api/run/r1/decision", method="POST", body=json.dumps({"response": "approve"})
+    )
+    assert status == 200
+    assert seen["capacity"] == 5
+    assert seen["run_date"] == "2026-09-14"
+
+
+def test_a_second_concurrent_decision_loses_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _ClaimFakeTable(_awaiting_item())
+    fake.claimed = True  # someone else already holds the decision claim
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+    status, body = call(
+        "/api/run/r1/decision", method="POST", body=json.dumps({"response": "approve"})
+    )
+    assert status == 409
+    assert body["error"] == "decision_in_progress"
+
+
+def test_garbage_capacity_is_refused_before_a_paid_slot_is_claimed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _KeyedFakeTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+    status, body = call("/api/run", method="POST", body=json.dumps({"capacity": "not-an-integer"}))
+    assert status == 400
+    assert body["error"] == "invalid_capacity"
+    assert fake.counts == {}, "no daily slot may be spent on a request that cannot run"
+
+
+def test_an_empty_ocr_body_is_refused_before_a_paid_slot_is_claimed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _KeyedFakeTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+    status, body = call("/api/ocr", method="POST", body=json.dumps({}))
+    assert status == 400
+    assert body["error"] == "image_required"
+    assert fake.counts == {}, "no daily OCR slot may be spent on an empty body"
