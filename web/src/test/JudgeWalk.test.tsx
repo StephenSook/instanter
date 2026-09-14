@@ -18,6 +18,7 @@ describe("JudgeWalk", () => {
       TESTFLIGHT_URL,
     );
     expect(screen.getByRole("link", { name: /android apk/i })).toHaveAttribute("href", APK_URL);
+    expect(screen.getByText(APK_URL)).toHaveClass("break-all");
     expect(screen.getByRole("link", { name: /count the rows yourself/i })).toHaveAttribute(
       "href",
       "/api/stats",

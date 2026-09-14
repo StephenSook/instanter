@@ -12,7 +12,7 @@ const STEPS: { n: string; title: string; body: string; href: string; external?: 
   {
     n: "01",
     title: "The number",
-    body: "4 of 46 answer deadlines in this corpus are ones counting seven days by hand gets wrong. Recomputed on this request.",
+    body: "4 of 46 answer deadlines in this corpus are ones counting seven days by hand gets wrong. Open the linked live proof to recompute the headline.",
     href: "/#live-proof",
   },
   {
@@ -84,8 +84,8 @@ export function JudgeWalk() {
         Walk the door
       </h1>
       <p className="mt-4 max-w-2xl font-serif text-[1.1rem] leading-snug text-white/75">
-        Each step is a live surface. Nothing on this list is a screenshot or a
-        stored number. Start at 01 and stop when you have seen enough.
+        Each step opens a live surface. Nothing on this list is a screenshot.
+        Start at 01 and stop when you have seen enough.
       </p>
 
       <ol className="mt-10 space-y-4">
@@ -103,7 +103,7 @@ export function JudgeWalk() {
               </p>
               <h2 className="display mt-1 text-[1.7rem] leading-none">{step.title}</h2>
               <p className="mt-2 font-serif text-[1.02rem] leading-snug">{step.body}</p>
-              <p className="mt-3 font-mono text-[0.62rem] tracking-[0.14em] text-[var(--color-ink-soft)] uppercase">
+              <p className="mt-3 break-all font-mono text-[0.62rem] tracking-[0.14em] text-[var(--color-ink-soft)] uppercase">
                 {step.href}
               </p>
             </a>
