@@ -18,6 +18,12 @@ function door(body: unknown, ok = true, status = 200) {
 }
 
 describe("SweepBanner", () => {
+  it("keeps the banner label above the text contrast floor", () => {
+    door({ awaiting: [] });
+    render(<SweepBanner />);
+    expect(screen.getByText("Scheduled sweep")).toHaveClass("text-white/60");
+  });
+
   it("says a sweep is waiting only when one actually is", async () => {
     door({
       awaiting: [{ run_id: "a", origin: "scheduled", created_at: 1_700_000_000, cases: 2 }],

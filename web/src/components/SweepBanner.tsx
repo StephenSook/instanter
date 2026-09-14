@@ -79,7 +79,7 @@ export function SweepBanner() {
   return (
     <div className="border-b border-white/10 bg-black/30">
       <div className="mx-auto flex max-w-[1400px] flex-wrap items-baseline gap-x-3 gap-y-1 px-5 py-3 sm:px-10">
-        <span className="text-[0.7rem] tracking-[0.18em] text-white/40 uppercase">
+        <span className="text-[0.7rem] tracking-[0.18em] text-white/60 uppercase">
           Scheduled sweep
         </span>
         <span className="text-[0.9rem] leading-snug text-white/70">

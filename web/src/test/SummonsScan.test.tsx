@@ -19,6 +19,11 @@ describe("SummonsScan", () => {
     vi.unstubAllGlobals();
   });
 
+  it("gives the summons file input an accessible name", () => {
+    render(<SummonsScan />);
+    expect(screen.getByLabelText(/upload a summons image/i)).toHaveAttribute("type", "file");
+  });
+
   it("prints the engine deadline from a transcribed service date", async () => {
     const user = userEvent.setup();
     vi.mocked(fetch)

@@ -93,6 +93,7 @@ export function SummonsScan() {
         </p>
         <div className="mt-6 flex flex-wrap items-center gap-3">
           <label className="font-mono text-[0.66rem] tracking-[0.16em] text-white uppercase">
+            <span className="sr-only">Upload a summons image</span>
             <input
               type="file"
               accept="image/png,image/jpeg,image/webp"
