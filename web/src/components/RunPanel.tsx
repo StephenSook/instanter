@@ -3,6 +3,7 @@ import gsap from "gsap";
 import {
   DoorError,
   decideRun,
+  loadRun,
   outcomeOf,
   receiptSteps,
   startRun,
@@ -26,7 +27,7 @@ import {
 type State =
   | { k: "idle" }
   | { k: "starting" }
-  | { k: "awaiting"; runId: string; result: RunResult }
+  | { k: "awaiting"; runId: string; result: RunResult; message?: string }
   | { k: "deciding"; runId: string; result: RunResult; answer: string }
   | { k: "resolved"; runId: string; result: RunResult }
   | { k: "capped"; detail: string; runsToday?: number; cap?: number }
@@ -147,7 +148,22 @@ export function RunPanel() {
       if (!env.result) throw new Error("the door returned no result");
       setState({ k: "resolved", runId, result: env.result });
     } catch (e) {
-      handleFailure(e);
+      const message = e instanceof Error ? e.message : String(e);
+      try {
+        const current = await loadRun(runId);
+        if (current.status === "resolved" && current.result) {
+          setState({ k: "resolved", runId, result: current.result });
+          return;
+        }
+      } catch {
+        // The original awaiting payload still gives the judge a safe retry.
+      }
+      setState({
+        k: "awaiting",
+        runId,
+        result,
+        message: `The decision response was interrupted (${message}). Nothing is shown as resolved. Wait a moment, then try the decision again.`,
+      });
     }
   }
 
@@ -200,6 +216,12 @@ export function RunPanel() {
           </p>
 
           <AttorneyDesk cases={state.result.awaiting ?? []} />
+
+          {state.k === "awaiting" && state.message && (
+            <p className="mt-5 font-mono text-[0.7rem] leading-snug text-[var(--color-flag)]" role="alert">
+              {state.message}
+            </p>
+          )}
 
           <div className="mt-7 flex flex-wrap items-center gap-3">
             <button
@@ -262,6 +284,13 @@ export function RunPanel() {
           <p className="mt-1.5 font-mono text-[0.66rem] text-white/55">
             Nothing is shown here that the door did not return.
           </p>
+          <button
+            type="button"
+            onClick={begin}
+            className="mt-5 rounded-[3px] border-2 border-white/60 px-5 py-2.5 font-mono text-[0.78rem] font-bold tracking-[0.2em] text-white uppercase focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-flag)]"
+          >
+            Try again
+          </button>
         </div>
       )}
     </Shell>

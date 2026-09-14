@@ -328,6 +328,28 @@ export function decideRun(runId: string, answer: string): Promise<RunEnvelope> {
   return send(`/api/run/${encodeURIComponent(runId)}/decision`, { response: answer });
 }
 
+export async function loadRun(runId: string): Promise<RunEnvelope> {
+  const response = await fetch(`/api/run/${encodeURIComponent(runId)}`, {
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    parsed = (await response.json()) as Record<string, unknown>;
+  } catch {
+    parsed = null;
+  }
+  if (!response.ok) {
+    const detail =
+      (parsed?.detail as string) || (parsed?.error as string) || `HTTP ${response.status}`;
+    throw new DoorError(detail, response.status, parsed);
+  }
+  if (parsed === null) {
+    throw new DoorError("The door did not answer this route with JSON.", response.status, null);
+  }
+  return parsed as unknown as RunEnvelope;
+}
+
 /** How the run actually ended, in the attorney's terms rather than HTTP's. */
 export type Outcome = "committed" | "deferred" | "unresolved";
 

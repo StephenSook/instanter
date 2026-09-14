@@ -131,6 +131,19 @@ describe("when the door cannot be reached", () => {
     expect(await screen.findByText(/nothing is shown here that the door did not return/i))
       .toBeInTheDocument();
   });
+
+  it("lets the judge retry a start after a transient failure", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+    render(<RunPanel />);
+    await user.click(screen.getByRole("button", { name: /sweep the queue/i }));
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ run_id: "run-2", status: "awaiting_attorney", result: AWAITING }),
+    );
+    await user.click(retry);
+    expect(await screen.findByText(/need a decision/i)).toBeInTheDocument();
+  });
 });
 
 describe("the daily spend cap", () => {
@@ -206,6 +219,37 @@ describe("the attorney desk and the receipt", () => {
 });
 
 describe("answering the interrupt", () => {
+  it("preserves the awaiting run when a decision response is interrupted", async () => {
+    const user = await startAndAwait();
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ run_id: "run-1", status: "awaiting_attorney", result: AWAITING }),
+    );
+    await user.click(screen.getByRole("button", { name: /^approve$/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/nothing is shown as resolved/i);
+    expect(screen.getByRole("button", { name: /^approve$/i })).toBeInTheDocument();
+  });
+
+  it("recovers a decision that landed after the browser lost its response", async () => {
+    const user = await startAndAwait();
+    fetchMock.mockRejectedValueOnce(new Error("network down"));
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        run_id: "run-1",
+        status: "resolved",
+        result: {
+          interrupted: false,
+          attorney_action: "approved",
+          committed: ["26ED00101", "26ED00102"],
+          failures: [],
+          succeeded: true,
+        },
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: /^approve$/i }));
+    expect(await screen.findByText("Approved")).toBeInTheDocument();
+  });
+
   it("approve commits the cases and reports success", async () => {
     const user = await startAndAwait();
     fetchMock.mockResolvedValueOnce(
