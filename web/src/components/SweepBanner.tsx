@@ -74,7 +74,7 @@ export function SweepBanner() {
 
   const scheduled =
     state.k === "loaded" ? state.awaiting.filter((a) => a.origin === "scheduled") : [];
-  const cases = scheduled.reduce((n, a) => n + a.cases, 0);
+  const cases = scheduled[0]?.cases ?? 0;
 
   return (
     <div className="border-b border-white/10 bg-black/30">

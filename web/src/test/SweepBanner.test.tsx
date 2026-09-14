@@ -28,6 +28,18 @@ describe("SweepBanner", () => {
     expect(screen.getByText(/not committed|Nothing in it is committed/i)).toBeTruthy();
   });
 
+  it("shows the newest scheduled sweep instead of adding repeated daily decisions", async () => {
+    door({
+      awaiting: [
+        { run_id: "new", origin: "scheduled", created_at: 1_700_086_400, cases: 2 },
+        { run_id: "old", origin: "scheduled", created_at: 1_700_000_000, cases: 2 },
+      ],
+    });
+    render(<SweepBanner />);
+    await waitFor(() => expect(screen.getByText(/2 cases/)).toBeTruthy());
+    expect(screen.queryByText(/4 cases/)).toBeNull();
+  });
+
   it("does NOT claim a scheduled sweep when the only run was a visitor's", async () => {
     door({
       awaiting: [{ run_id: "a", origin: "visitor", created_at: 1_700_000_000, cases: 5 }],
