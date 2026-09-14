@@ -12,6 +12,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@fontsource/anton": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/ibm-plex-serif": "5.3.0",
     "gsap": "^3.15.0",
     "lenis": "^1.3.26",
     "react": "^19.2.8",
