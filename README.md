@@ -58,7 +58,7 @@ The APK is a release asset rather than a build-service URL on purpose: build-ser
 
 ## Status
 
-Under active build for the Agents for Humans Hackathon (submission window Aug 10 to Sep 14, 2026). This README grows with the code; nothing is claimed here before it ships.
+Submitted to the Professional track on August 28, 2026. The product is deployed and the repository is in judging-period maintenance through October 8, 2026. Nothing is claimed here before it ships.
 
 Shipped and reachable today: the deterministic deadline engine, the triage agent with its attorney-approval interrupt on AgentCore Runtime, the operator console, the public door above, summons OCR (`POST /api/ocr`), Web Push on a real attorney interrupt (`GET /api/push/vapid`), custom `instanter.*` spans on the run receipt, and S3 Object Lock (Compliance, 30 days) on the audit trail. The iOS app starts a count-only Live Activity at the interrupt. TestFlight build 14 (2026-08-26) includes the widget; join at https://testflight.apple.com/join/JqZ1wX25.
 
