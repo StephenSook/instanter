@@ -1,0 +1,28 @@
+name: core path health
+
+# The public page can stay green while the paid AgentCore path is unavailable.
+# A separate weekday check therefore requires a recent count-only receipt from
+# the real 7:05 a.m. scheduled sweep. Its 30-hour window tolerates GitHub cron
+# delay but fails when the scheduled core path misses a weekday run.
+
+on:
+  schedule:
+    - cron: "37 17 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-path-health
+  cancel-in-progress: false
+
+jobs:
+  scheduled-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require a recent real AgentCore sweep
+        run: bash scripts/check_core.sh
