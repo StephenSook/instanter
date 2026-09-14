@@ -131,4 +131,19 @@ describe("WhatIfCalendar", () => {
     expect(await screen.findByText(/the engine did not answer/i)).toBeInTheDocument();
     expect(screen.queryByText("2026-08-17")).not.toBeInTheDocument();
   });
+
+  it("refuses an HTTP 200 response that is not JSON", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError("Unexpected token '<'");
+      },
+    } as unknown as Response);
+    render(<WhatIfCalendar />);
+    await user.click(screen.getByRole("button", { name: /weekend roll/i }));
+    expect(await screen.findByText(/did not answer this route with JSON/i)).toBeInTheDocument();
+    expect(screen.queryByText("2026-08-17")).not.toBeInTheDocument();
+  });
 });

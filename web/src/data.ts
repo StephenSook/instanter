@@ -312,6 +312,9 @@ export async function loadWhatIf(serviceDate: string): Promise<WhatIf> {
       (parsed?.detail as string) || (parsed?.error as string) || `HTTP ${response.status}`;
     throw new DoorError(detail, response.status, parsed);
   }
+  if (parsed === null) {
+    throw new DoorError("The door did not answer this route with JSON.", response.status, null);
+  }
   return parsed as unknown as WhatIf;
 }
 
