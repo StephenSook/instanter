@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 /**
  * Subscribe this browser to attorney-interrupt pings.
@@ -20,6 +20,7 @@ type State =
   | { k: "off" }
   | { k: "ready" }
   | { k: "on" }
+  | { k: "needs-run"; detail: string }
   | { k: "blocked"; detail: string };
 
 function initialState(): State {
@@ -33,11 +34,39 @@ function initialState(): State {
 export function PushToggle() {
   const [state, setState] = useState<State>(initialState);
 
+  useEffect(() => {
+    const retryAfterRun = () => {
+      setState((current) => (current.k === "needs-run" ? { k: "ready" } : current));
+    };
+    window.addEventListener("instanter:interrupt-ready", retryAfterRun);
+    return () => window.removeEventListener("instanter:interrupt-ready", retryAfterRun);
+  }, []);
+
   async function subscribe() {
     try {
+      let runId = "";
+      try {
+        runId = window.sessionStorage.getItem("instanter:last-interrupt-run") || "";
+      } catch {
+        // The message below covers privacy modes that disable session storage.
+      }
+      if (!runId) {
+        setState({
+          k: "needs-run",
+          detail: "Run a live sweep first. A recent attorney interrupt is required to subscribe.",
+        });
+        return;
+      }
       const keyRes = await fetch("/api/push/vapid", { cache: "no-store" });
       const keyBody = (await keyRes.json()) as { publicKey?: string; detail?: string };
       if (!keyRes.ok || !keyBody.publicKey) {
+        if (keyRes.status >= 500) {
+          setState({
+            k: "needs-run",
+            detail: "The door could not load notification settings. Try once more.",
+          });
+          return;
+        }
         setState({
           k: "blocked",
           detail: keyBody.detail || "This door has no VAPID key.",
@@ -64,15 +93,35 @@ export function PushToggle() {
       const saved = await fetch("/api/push/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sub.toJSON()),
+        body: JSON.stringify({ ...sub.toJSON(), run_id: runId }),
       });
       if (!saved.ok) {
+        if (saved.status >= 500) {
+          setState({
+            k: "needs-run",
+            detail: "The door could not save the subscription. Try once more.",
+          });
+          return;
+        }
         // The door explains its refusals; carry its words up.
         let detail = "The door refused the subscription.";
         try {
           const b = (await saved.json()) as { error?: string; cap?: number };
           if (b.error === "subscription_cap_reached") {
             detail = `The door is at its subscription cap (${b.cap ?? "full"}).`;
+          } else if (b.error === "subscription_busy") {
+            setState({
+              k: "needs-run",
+              detail: "The subscription is still being saved. Try once more.",
+            });
+            return;
+          } else if (b.error === "recent_visitor_interrupt_required") {
+            window.sessionStorage.removeItem("instanter:last-interrupt-run");
+            setState({
+              k: "needs-run",
+              detail: "That sweep is no longer awaiting a decision. Run a new live sweep.",
+            });
+            return;
           } else if (b.error) {
             detail = `The door refused the subscription: ${b.error}.`;
           }
@@ -85,7 +134,7 @@ export function PushToggle() {
       setState({ k: "on" });
     } catch (e) {
       setState({
-        k: "blocked",
+        k: "needs-run",
         detail: e instanceof Error ? e.message : "subscribe failed",
       });
     }
@@ -111,6 +160,18 @@ export function PushToggle() {
           <p className="font-mono text-[0.66rem] tracking-[0.16em] text-[var(--color-flag)] uppercase">
             Subscribed
           </p>
+        )}
+        {state.k === "needs-run" && (
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <p className="font-mono text-[0.66rem] text-white/45">{state.detail}</p>
+            <button
+              type="button"
+              onClick={() => void subscribe()}
+              className="font-mono text-[0.66rem] tracking-[0.16em] text-white uppercase underline decoration-white/40 underline-offset-4"
+            >
+              Try notifications again
+            </button>
+          </div>
         )}
         {state.k === "blocked" && (
           <p className="font-mono text-[0.66rem] text-white/45">{state.detail}</p>

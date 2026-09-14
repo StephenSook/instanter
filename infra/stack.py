@@ -92,9 +92,10 @@ class JudgeDoorStack(cdk.Stack):
             billing=dynamodb.Billing.on_demand(),
             removal_policy=cdk.RemovalPolicy.DESTROY,
             # Push endpoints churn (reinstalls, revoked permission) and the
-            # subscribe cap is a hard 200, so without expiry the table fills
-            # with corpses until every new subscription is refused and every
-            # ping walks 200 dead endpoints. Rows also die early when the push
+            # subscribe cap is a hard 5, so without expiry the table fills
+            # with corpses until every new subscription is refused. Fixed,
+            # conditionally claimed slots keep concurrent writers within that
+            # bound. Rows also die early when the push
             # service says Gone (push.py deletes them).
             time_to_live_attribute="expires_at",
         )
@@ -167,6 +168,13 @@ class JudgeDoorStack(cdk.Stack):
                 "VAPID_PUBLIC_KEY": os.environ.get("VAPID_PUBLIC_KEY", ""),
                 "VAPID_PRIVATE_KEY": os.environ.get("VAPID_PRIVATE_KEY", ""),
                 "VAPID_MAILTO": os.environ.get("VAPID_MAILTO", "mailto:stephensookra@gmail.com"),
+                "MAX_PUSH_SUBSCRIPTIONS": os.environ.get("MAX_PUSH_SUBSCRIPTIONS", "5"),
+                "MAX_PUSH_ADMISSIONS_PER_IP_DAY": os.environ.get(
+                    "MAX_PUSH_ADMISSIONS_PER_IP_DAY", "1"
+                ),
+                "PUSH_ADMISSION_MAX_AGE_SECONDS": os.environ.get(
+                    "PUSH_ADMISSION_MAX_AGE_SECONDS", "900"
+                ),
             },
         )
         # FUNCTION-ERROR retries for the scheduled sweep, explicit rather than

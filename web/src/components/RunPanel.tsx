@@ -132,8 +132,15 @@ export function RunPanel() {
       const env: RunEnvelope = await startRun(2);
       const result = env.result;
       if (!result) throw new Error("the door returned no result");
-      if (result.interrupted) setState({ k: "awaiting", runId: env.run_id, result });
-      else setState({ k: "resolved", runId: env.run_id, result });
+      if (result.interrupted) {
+        try {
+          window.sessionStorage.setItem("instanter:last-interrupt-run", env.run_id);
+          window.dispatchEvent(new Event("instanter:interrupt-ready"));
+        } catch {
+          // Push opt-in will explain that this browser cannot retain the proof.
+        }
+        setState({ k: "awaiting", runId: env.run_id, result });
+      } else setState({ k: "resolved", runId: env.run_id, result });
     } catch (e) {
       handleFailure(e);
     }

@@ -55,6 +55,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
+  window.sessionStorage.clear();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -73,12 +74,20 @@ async function startAndAwait() {
 }
 
 describe("starting a run", () => {
+  it("announces a fresh visitor interrupt to the notification control", async () => {
+    const listener = vi.fn();
+    window.addEventListener("instanter:interrupt-ready", listener, { once: true });
+    await startAndAwait();
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
   it("shows the cases the attorney is being asked about, from the response", async () => {
     await startAndAwait();
     expect(screen.getByText("26ED00101")).toBeInTheDocument();
     expect(screen.getByText("26ED00102")).toBeInTheDocument();
     // Rendered from the payload, not counted in the UI.
     expect(screen.getByText(/48 swept/)).toBeInTheDocument();
+    expect(window.sessionStorage.getItem("instanter:last-interrupt-run")).toBe("run-1");
   });
 
   it("states that nothing is committed until the human answers", async () => {

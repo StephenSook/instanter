@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import sys
+import time
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -919,6 +921,33 @@ def test_push_vapid_returns_the_public_key(monkeypatch: pytest.MonkeyPatch) -> N
     assert body["publicKey"] == "BK_test_public"
 
 
+def test_push_missing_visitor_proof_uses_a_status_cloudfront_will_not_rewrite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The distribution maps every 403 to the SPA document with HTTP 200.
+
+    A 403 here made PushToggle read HTML as a successful save and display
+    Subscribed. 412 states the failed precondition and reaches the browser as
+    the JSON refusal the door produced.
+    """
+    monkeypatch.setenv("PUSH_TABLE", "push-table")
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "")
+
+    class _EmptyRuns:
+        @staticmethod
+        def get_item(**_kwargs: Any) -> dict[str, Any]:
+            return {}
+
+    monkeypatch.setattr(door, "table", lambda: _EmptyRuns())
+    status, body = call(
+        "/api/push/subscribe",
+        method="POST",
+        body=json.dumps({"run_id": "not-a-real-run"}),
+    )
+    assert status == 412
+    assert body["error"] == "recent_visitor_interrupt_required"
+
+
 # --------------------------------------------- surfaced failures, not silent
 
 
@@ -1040,13 +1069,15 @@ def test_a_crashed_push_notify_is_surfaced_not_swallowed(
     monkeypatch.setattr(lock_mod, "lock_record", lambda *_a, **_k: None)
 
     def _boom(_table: Any) -> int:
-        raise RuntimeError("scan refused")
+        error = RuntimeError("one provider refused")
+        error.sent = 1  # type: ignore[attr-defined]
+        raise error
 
     monkeypatch.setattr(push_mod, "notify_interrupt", _boom)
     status, body = call("/api/run", method="POST", body=json.dumps({"capacity": 2}))
     assert status == 202
-    assert body["result"]["push_sent"] == 0
-    assert "scan refused" in body["result"]["push_error"]
+    assert body["result"]["push_sent"] == 1
+    assert "one provider refused" in body["result"]["push_error"]
 
 
 # ---------------------------------------------- the decision path, hardened
@@ -1562,3 +1593,94 @@ def test_a_bad_capacity_in_the_event_releases_the_claim(
             }
         )
     assert fake.deleted, "the claim must be released so the retry can take it"
+
+
+def test_push_admission_uses_cloudfronts_appended_viewer_ip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(door, "ORIGIN_SECRET", "origin-secret")
+    forged_prefix = {"x-forwarded-for": "203.0.113.8, 198.51.100.9"}
+    no_prefix = {"x-forwarded-for": "198.51.100.9"}
+    first = door._push_client_key(forged_prefix, {})
+    second = door._push_client_key(no_prefix, {})
+    assert first == second
+    assert first
+    assert "198.51.100.9" not in first
+    assert door._push_client_key({"x-forwarded-for": "192.0.2.4"}, {}) != first
+
+
+def test_push_admission_requires_a_recent_real_visitor_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = int(time.time())
+
+    class _Runs:
+        def __init__(self) -> None:
+            self.item: dict[str, Any] = {}
+
+        def get_item(self, **_kwargs: Any) -> dict[str, Any]:
+            return {"Item": dict(self.item)} if self.item else {}
+
+    runs = _Runs()
+    monkeypatch.setattr(door, "table", lambda: runs)
+    monkeypatch.setattr(time, "time", lambda: now)
+    body = {"run_id": "visitor-run"}
+
+    for rejected in (
+        {},
+        {"status": "complete", "origin": "visitor", "created_at": now},
+        {"status": "awaiting_attorney", "origin": "scheduled", "created_at": now},
+        {"status": "awaiting_attorney", "origin": "visitor", "created_at": now - 901},
+    ):
+        runs.item = rejected
+        assert door._recent_visitor_interrupt(body, "viewer-key") is False
+
+    runs.item = {
+        "status": "awaiting_attorney",
+        "origin": "visitor",
+        "created_at": Decimal(now - 30),
+        "visitor_key": "viewer-key",
+    }
+    assert door._recent_visitor_interrupt(body, "other-key") is False
+    assert door._recent_visitor_interrupt(body, "viewer-key") is True
+
+
+def test_a_visitor_run_stores_its_private_client_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _ReleaseFakeTable()
+    monkeypatch.setattr(door, "table", lambda: fake)
+    monkeypatch.setattr(door, "claim_daily_run_slot", lambda _origin: (True, 1))
+    monkeypatch.setattr(door, "RUNTIME_ARN", "arn:aws:bedrock-agentcore:us-east-1:1:runtime/x")
+    monkeypatch.setattr(lock_mod, "lock_record", lambda *_a, **_k: None)
+    monkeypatch.delenv("PUSH_TABLE", raising=False)
+
+    class _Boto:
+        @staticmethod
+        def client(*_a: Any, **_k: Any) -> Any:
+            return _FakeAgentClient({"interrupted": True, "awaiting": []})
+
+    monkeypatch.setattr(door, "boto3", _Boto)
+    response = door.start_run({}, visitor_key="viewer-key")
+    assert response["statusCode"] == 202
+    assert fake.puts[-1]["visitor_key"] == "viewer-key"
+
+
+def test_a_run_response_never_exposes_the_private_client_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _DecideFakeTable(
+        {
+            "run_id": "r1",
+            "status": "awaiting_attorney",
+            "visitor_key": "private-viewer-key",
+            "runtime_session_id": "private-runtime-session",
+        }
+    )
+    monkeypatch.setattr(door, "table", lambda: fake)
+    response = door.get_run("r1")
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert body["run_id"] == "r1"
+    assert "visitor_key" not in body
+    assert "runtime_session_id" not in body

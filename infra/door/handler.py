@@ -38,11 +38,14 @@ is watching the product work rather than reading a number someone typed.
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import hmac
 import json
 import os
 import time
 import uuid
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -115,6 +118,7 @@ MAX_SCHEDULED_RUNS_PER_DAY = int(os.environ.get("MAX_SCHEDULED_RUNS_PER_DAY", "2
 # when it bites the response says `truncated: true` rather than presenting a
 # partial page as the whole list.
 MAX_AWAITING_SCAN = int(os.environ.get("MAX_AWAITING_SCAN", "500"))
+PUSH_ADMISSION_MAX_AGE_SECONDS = int(os.environ.get("PUSH_ADMISSION_MAX_AGE_SECONDS", "900"))
 # Deadlines are counted in the court's calendar, not in UTC. Fulton County
 # State Court sits here, and a named zone follows daylight saving on its own.
 COURT_TZ = ZoneInfo(os.environ.get("COURT_TZ", "America/New_York"))
@@ -164,6 +168,46 @@ def _json(status: int, body: dict[str, Any]) -> dict[str, Any]:
         },
         "body": json.dumps(body, default=str),
     }
+
+
+def _push_client_key(headers: dict[str, str], event: dict[str, Any]) -> str:
+    """Return a non-reversible admission key for the CloudFront viewer IP.
+
+    CloudFront appends the TCP peer to X-Forwarded-For, so the final entry is
+    authoritative even when a viewer supplied a forged prefix. The origin
+    secret makes the stored digest useless as an offline IP lookup table.
+    """
+    chain = headers.get("x-forwarded-for", "")
+    source_ip = chain.rsplit(",", 1)[-1].strip() if chain else ""
+    if not source_ip:
+        source_ip = str(event.get("requestContext", {}).get("http", {}).get("sourceIp") or "")
+    if not source_ip or not ORIGIN_SECRET:
+        return ""
+    return hmac.new(
+        ORIGIN_SECRET.encode("utf-8"), source_ip.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+
+def _recent_visitor_interrupt(body: dict[str, Any], client_key: str) -> bool:
+    """Require a real, recent visitor sweep before accepting a push endpoint."""
+    run_id = body.get("run_id")
+    if not isinstance(run_id, str) or not run_id or len(run_id) > 128:
+        return False
+    item = table().get_item(Key={"run_id": run_id}, ConsistentRead=True).get("Item")
+    if not item or item.get("status") != "awaiting_attorney" or item.get("origin") != "visitor":
+        return False
+    stored_key = item.get("visitor_key")
+    if (
+        not client_key
+        or not isinstance(stored_key, str)
+        or not hmac.compare_digest(stored_key, client_key)
+    ):
+        return False
+    created_at = item.get("created_at")
+    if isinstance(created_at, bool) or not isinstance(created_at, (int, Decimal)):
+        return False
+    age = int(time.time()) - int(created_at)
+    return -300 <= age <= PUSH_ADMISSION_MAX_AGE_SECONDS
 
 
 # ---------------------------------------------------------------- statutory
@@ -530,7 +574,10 @@ def _runtime_session_id() -> str:
 
 
 def start_run(
-    body: dict[str, Any], origin: str = "visitor", run_date: str | None = None
+    body: dict[str, Any],
+    origin: str = "visitor",
+    run_date: str | None = None,
+    visitor_key: str = "",
 ) -> dict[str, Any]:
     if not RUNTIME_ARN:
         # Loud, not silent. A door that pretends to start a run it cannot start
@@ -595,6 +642,7 @@ def start_run(
             "expires_at": now + 7 * 24 * 3600,
             "capacity": capacity,
             **({"run_date": run_date} if run_date else {}),
+            **({"visitor_key": visitor_key} if origin == "visitor" and visitor_key else {}),
         }
     )
 
@@ -659,7 +707,7 @@ def start_run(
                 boto3.resource("dynamodb", region_name=REGION).Table(os.environ["PUSH_TABLE"])
             )
         except Exception as exc:
-            result["push_sent"] = 0
+            result["push_sent"] = int(getattr(exc, "sent", 0))
             result["push_error"] = str(exc)[:200]
     # Persist the operational outcome to the ROW, not only to this response.
     # The scheduled sweep's response goes to EventBridge, which reads none of
@@ -690,6 +738,7 @@ def get_run(run_id: str) -> dict[str, Any]:
     if raw:
         payload["result"] = json.loads(raw)
     payload.pop("runtime_session_id", None)  # internal
+    payload.pop("visitor_key", None)  # internal admission binding
     return _json(200, payload)
 
 
@@ -1268,8 +1317,21 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
     if path == "/api/push/subscribe" and method == "POST":
         if not os.environ.get("PUSH_TABLE"):
             return _json(503, {"error": "push_not_configured"})
+        client_key = _push_client_key(headers, event)
+        if not _recent_visitor_interrupt(body, client_key):
+            return _json(
+                412,
+                {
+                    "error": "recent_visitor_interrupt_required",
+                    "detail": "Run a live sweep before subscribing this browser.",
+                },
+            )
         push_tbl = boto3.resource("dynamodb", region_name=REGION).Table(os.environ["PUSH_TABLE"])
-        saved = door_push.save_subscription(push_tbl, body)
+        saved = door_push.save_subscription(
+            push_tbl,
+            body,
+            client_key=client_key,
+        )
         if saved.get("error"):
             return _json(400, saved)
         return _json(200, saved)
@@ -1322,7 +1384,7 @@ def handler(event: dict[str, Any], _context: Any = None) -> dict[str, Any]:
     if path == "/api/awaiting" and method == "GET":
         return _json(200, list_awaiting())
     if path == "/api/run" and method == "POST":
-        return start_run(body)
+        return start_run(body, visitor_key=_push_client_key(headers, event))
     if path.startswith("/api/run/"):
         rest = path[len("/api/run/") :]
         if rest.endswith("/decision") and method == "POST":
