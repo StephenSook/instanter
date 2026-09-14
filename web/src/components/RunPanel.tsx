@@ -200,7 +200,6 @@ export function RunPanel() {
           </p>
 
           <AttorneyDesk cases={state.result.awaiting ?? []} />
-          <RunReceipt result={state.result} />
 
           <div className="mt-7 flex flex-wrap items-center gap-3">
             <button
@@ -234,6 +233,7 @@ export function RunPanel() {
               Recording the decision and resuming the run.
             </p>
           )}
+          <RunReceipt result={state.result} />
         </div>
       )}
 

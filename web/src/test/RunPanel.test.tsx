@@ -196,6 +196,13 @@ describe("the attorney desk and the receipt", () => {
     expect(receipt).toHaveTextContent("extract");
     expect(receipt).toHaveTextContent("48 cases read");
   });
+
+  it("puts the attorney decision before the potentially long run receipt", async () => {
+    await startAndAwait();
+    const approve = screen.getByRole("button", { name: /^approve$/i });
+    const receipt = screen.getByRole("list", { name: /run receipt/i });
+    expect(approve.compareDocumentPosition(receipt) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });
 
 describe("answering the interrupt", () => {
